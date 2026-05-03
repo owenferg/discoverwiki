@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DiscoverWiki</title>
+    <link rel="preconnect" href="https://api.mapbox.com" />
+    <link rel="preconnect" href="https://upload.wikimedia.org" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css" rel="stylesheet" />
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css" rel="stylesheet" />
+    <link href="./styles.css" rel="stylesheet" />
+  </head>
+  <body>
+    <main id="appShell" class="app-shell app-shell--title">
+      <!-- title screen -->
+      <section id="titleScreen" class="title-screen" aria-label="DiscoverWiki home">
+        <div class="title-screen__content">
+          <p class="title-screen__kicker">A walking game for Wikipedia</p>
+          <h1>discoverWiki</h1>
+          <p class="title-screen__lede">Wander the real world, reveal nearby articles, and grow your collection.</p>
+          <p id="titleNotice" class="title-notice is-hidden"></p>
+          <div class="title-actions">
+            <button id="discoverButton" class="primary-button title-action-button" type="button">Discover</button>
+            <button id="viewCollectionButton" class="ghost-button title-action-button" type="button">View Collection</button>
+          </div>
+          <div id="titleLocationLoading" class="title-location-loading is-hidden" role="status" aria-live="polite">
+            <div class="title-loading-spinner" aria-hidden="true"></div>
+            <span id="titleLocationLoadingText">Finding your location...</span>
+          </div>
+        </div>
+
+        <div class="desktop-intent">
+          <p>This webapp is intended for mobile use. Please open this site on a mobile device.</p>
+          <div class="mobile-preview-placeholder" aria-label="Future mobile preview image placeholder"></div>
+        </div>
+      </section>
+
+      <!-- top tabs -->
+      <nav id="appTabs" class="app-tabs is-hidden" aria-label="Primary views" hidden>
+        <button class="tab-button is-active" type="button" data-tab="discover">Discover</button>
+        <button class="tab-button" type="button" data-tab="collection">Collection</button>
+      </nav>
+
+      <!-- discover map -->
+      <section id="exploreView" class="discover-view is-hidden" aria-label="Map showing nearby and collected Wikipedia articles" hidden>
+        <div id="map" class="map-canvas"></div>
+        <svg id="fogOverlay" class="fog-overlay" aria-hidden="true"></svg>
+        <button id="devModeButton" class="dev-mode-button is-hidden" type="button" aria-label="dev mode active">
+          <i class="bi bi-bug-fill" aria-hidden="true"></i>
+        </button>
+        <div class="discover-status-pill">
+          <span id="statusText" class="status-text loading">Choose Discover to start.</span>
+        </div>
+        <form id="mapSearchForm" class="map-search" role="search">
+          <i class="bi bi-search" aria-hidden="true"></i>
+          <input id="mapSearchInput" type="search" placeholder="Zoom to location..." aria-label="Zoom to location" />
+          <button class="map-search__button" type="submit">Go</button>
+        </form>
+        <div class="map-button-row" aria-label="Map controls">
+          <button id="recenterButton" class="map-icon-button" type="button" aria-label="Recenter map">
+            <i class="bi bi-cursor-fill" aria-hidden="true"></i>
+          </button>
+          <button id="refreshButton" class="map-icon-button" type="button" aria-label="Refresh nearby articles">
+            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div id="articleList" class="article-list is-hidden" role="list"></div>
+      </section>
+
+      <!-- collection list -->
+      <section id="collectionView" class="collection-screen is-hidden" aria-label="Collected Wikipedia articles" hidden>
+        <header class="collection-header">
+          <div>
+            <p class="collection-kicker">Your discoveries</p>
+            <h2>Collection</h2>
+          </div>
+          <div class="stat-grid" aria-label="Collection summary">
+            <article class="stat-card">
+              <span class="stat-card__label">Nearby</span>
+              <strong id="resultCount" class="stat-card__value">0</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-card__label">Collected</span>
+              <strong id="collectionCount" class="stat-card__value">0</strong>
+            </article>
+            <article class="stat-card stat-card--accent">
+              <span class="stat-card__label">Strength</span>
+              <strong id="strengthCount" class="stat-card__value">0</strong>
+            </article>
+          </div>
+        </header>
+
+        <div class="collection-toolbar">
+          <div class="scope-row" role="tablist" aria-label="Collection views">
+            <button class="scope-button is-active" type="button" data-scope="all">All</button>
+            <button class="scope-button" type="button" data-scope="folders">Favorites & folders</button>
+          </div>
+
+          <label class="sort-control">
+            <span>Sort by</span>
+            <select id="collectionSort">
+              <option value="date-desc">Date discovered (recent)</option>
+              <option value="date-asc">Date discovered (old)</option>
+              <option value="quality-desc">Quality (high to low)</option>
+              <option value="quality-asc">Quality (low to high)</option>
+              <option value="category">Category</option>
+              <option value="city">Location: city</option>
+              <option value="region">Location: state/region</option>
+              <option value="country">Location: country</option>
+              <option value="continent">Location: continent</option>
+            </select>
+          </label>
+        </div>
+
+        <section class="folder-builder" aria-label="Create a folder">
+          <div class="folder-builder__header">
+            <h2>Create folder</h2>
+            <p>Pick a name and icon for a new collection folder.</p>
+          </div>
+          <div class="folder-builder__controls">
+            <input
+              id="folderNameInput"
+              class="folder-name-input"
+              type="text"
+              maxlength="28"
+              placeholder="Museum finds"
+              aria-label="Folder name"
+            />
+            <button id="createFolderButton" class="create-folder-button" type="button">Create</button>
+          </div>
+          <div id="folderIconPicker" class="folder-icon-picker" role="listbox" aria-label="Folder icon"></div>
+        </section>
+
+        <div id="folderList" class="folder-list" aria-label="Collection folders"></div>
+        <div id="collectionList" class="article-list collection-list" role="list"></div>
+      </section>
+    </main>
+
+    <!-- article modal -->
+    <div id="articleModal" class="modal-shell is-hidden" aria-hidden="true" hidden>
+      <div class="modal-backdrop" data-close-modal="true"></div>
+      <section class="article-modal" role="dialog" aria-modal="true" aria-labelledby="modalHeading">
+        <button id="modalCloseButton" class="modal-close" type="button" aria-label="Close article panel">
+          <i class="bi bi-x-lg" aria-hidden="true"></i>
+        </button>
+        <p id="modalBadge" class="modal-badge">Article unlocked</p>
+        <h2 id="modalHeading">Article Title</h2>
+        <div class="modal-media">
+          <img id="modalImage" class="modal-image is-hidden" alt="" />
+          <div id="modalImageFallback" class="modal-image-fallback">
+            <i class="bi bi-question-lg" aria-hidden="true"></i>
+          </div>
+        </div>
+        <div class="modal-meta">
+          <span id="modalCategory" class="meta-chip">Category</span>
+          <span id="modalQuality" class="meta-chip">Quality</span>
+          <span id="modalDate" class="meta-chip">Discovered</span>
+          <span id="modalLocation" class="meta-chip">Location</span>
+        </div>
+        <p id="modalSummary" class="modal-summary"></p>
+        <a id="modalLink" class="modal-link" href="#" target="_blank" rel="noopener noreferrer">
+          Read full article
+        </a>
+      </section>
+    </div>
+
+    <!-- tutorial overlay -->
+    <div id="tutorialOverlay" class="tutorial-overlay is-hidden" aria-hidden="true">
+      <div id="tutorialBackdrop" class="tutorial-backdrop"></div>
+      <div class="tutorial-scrim tutorial-scrim--top"></div>
+      <div class="tutorial-scrim tutorial-scrim--right"></div>
+      <div class="tutorial-scrim tutorial-scrim--bottom"></div>
+      <div class="tutorial-scrim tutorial-scrim--left"></div>
+      <div id="tutorialHighlight" class="tutorial-highlight is-hidden"></div>
+      <section id="tutorialCard" class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle">
+        <h2 id="tutorialTitle"></h2>
+        <div id="tutorialBody" class="tutorial-body"></div>
+        <button id="tutorialButton" class="tutorial-button" type="button"></button>
+      </section>
+    </div>
+
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
+    <script src="./app.js" defer></script>
+  </body>
+</html>
