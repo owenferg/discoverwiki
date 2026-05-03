@@ -1,0 +1,62 @@
+# python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# python tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+credentials.json
+
+# node and frontend tooling
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+build/
+.parcel-cache/
+.vite/
+
+# logs and local runtime files
+*.log
+logs/
+*.pid
+*.seed
+*.tmp
+*.temp
+
+# os files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# editor files
+.idea/
+.vscode/*
+!.vscode/settings.json
+*.swp
+*.swo
+
+# cursor local artifacts
+.cursor/
+
