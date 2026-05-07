@@ -2,11 +2,18 @@ mapboxgl.accessToken = "pk.eyJ1Ijoib3dlbmZlcmciLCJhIjoiY21uaHp6a3Z5MDg5NjJwb2Rrd
 
 // app config
 const DISCOVER_RADIUS_MILES = 0.1;
+const FOG_TRAIL_RADIUS_MILES = DISCOVER_RADIUS_MILES;
+const FOG_TRAIL_DEDUPE_MILES = 0.055;
+const MAX_FOG_TRAIL_SAMPLES = 6000;
 const ARTICLE_REFRESH_DISTANCE_MILES = 0.08;
 const MAX_LOCKED_MARKERS = 20;
 const STORAGE_KEY = "discoverwiki-state-v1";
 const TUTORIAL_STORAGE_KEY = "discoverwiki-tutorial-complete-v1";
 const WIKIRANK_PROXY_PATH = "/api/wikirank";
+const WIKIRANK_QUERY_LANG = "en";
+// WikiRank returns result.en.popularity === 100 for essentially every English article; comparable popularity comes from summing other editions.
+const WIKIRANK_POPULARITY_METRIC = "intl-sum-v1";
+const WIKIRANK_PARALLEL = 3;
 const GEOLOCATION_FAST_OPTIONS = { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 };
 const GEOLOCATION_FALLBACK_OPTIONS = { enableHighAccuracy: false, timeout: 25000, maximumAge: 300000 };
 const GEOLOCATION_WATCH_OPTIONS = { enableHighAccuracy: true, maximumAge: 30000 };
@@ -27,20 +34,21 @@ const FOLDER_ICON_OPTIONS = [
 
 // article categories
 const CATEGORY_DEFINITIONS = [
-  { key: "people", label: "People", color: "#D4A017", keywords: ["births", "deaths", "people", "biographies", "actors", "artists", "writers", "politicians"] },
-  { key: "geography", label: "Places", color: "#2D9CDB", keywords: ["geography", "cities", "city", "towns", "villages", "neighborhoods", "districts", "countries", "states", "continents", "mountains", "rivers", "parks", "bridges", "buildings", "landmarks", "streets", "counties"] },
-  { key: "history", label: "History", color: "#C96D16", keywords: ["history", "historical", "wars", "battle", "century", "historic", "archaeology", "heritage"] },
-  { key: "nature", label: "Nature", color: "#2E9D61", keywords: ["nature", "flora", "fauna", "species", "ecology", "environment", "forest", "lake", "ocean", "geology"] },
-  { key: "science", label: "Science", color: "#4C6FFF", keywords: ["science", "physics", "chemistry", "biology", "mathematics", "astronomy", "medicine", "research"] },
-  { key: "technology", label: "Technology", color: "#7C58D6", keywords: ["technology", "engineering", "software", "computing", "internet", "machines", "electronics", "transport"] },
-  { key: "culture", label: "Culture", color: "#DB4EA2", keywords: ["art", "music", "film", "television", "literature", "books", "theatre", "architecture", "museums", "festival"] },
-  { key: "society", label: "Society", color: "#F97316", keywords: ["society", "education", "schools", "universities", "government", "law", "business", "companies", "religion"] },
-  { key: "sports", label: "Sports", color: "#E74C3C", keywords: ["sports", "athletes", "teams", "football", "baseball", "basketball", "soccer", "olympics", "tennis"] },
+  { key: "people", label: "People", color: "#D4A017", keywords: ["births", "deaths", "people", "person", "biographies", "actors", "artists", "writers", "politicians", "mayors", "governors", "architects", "musicians", "athletes"] },
+  { key: "geography", label: "Places", color: "#2D9CDB", keywords: ["geography", "places", "cities", "city", "towns", "villages", "boroughs", "neighborhoods", "districts", "countries", "states", "continents", "counties", "streets", "avenues", "squares", "plazas", "parks", "bridges", "buildings", "landmarks", "towers", "halls"] },
+  { key: "history", label: "History", color: "#C96D16", keywords: ["history", "historical", "wars", "battle", "century", "historic", "archaeology", "heritage", "establishments", "national register", "landmarks preservation"] },
+  { key: "nature", label: "Nature", color: "#2E9D61", keywords: ["nature", "flora", "fauna", "species", "ecology", "environment", "climate", "weather", "forest", "lake", "ocean", "geology", "rivers", "mountains"] },
+  { key: "science", label: "Science", color: "#4C6FFF", keywords: ["science", "physics", "chemistry", "biology", "mathematics", "astronomy", "medicine", "research", "climatology"] },
+  { key: "technology", label: "Technology", color: "#7C58D6", keywords: ["technology", "engineering", "software", "computing", "internet", "machines", "electronics", "transport", "railway", "subway", "airport"] },
+  { key: "culture", label: "Culture", color: "#DB4EA2", keywords: ["art", "arts", "music", "film", "television", "literature", "books", "theatre", "theater", "architecture", "museums", "festival", "monuments", "memorials"] },
+  { key: "society", label: "Society", color: "#F97316", keywords: ["society", "education", "schools", "universities", "government", "law", "business", "companies", "religion", "civic", "courts", "churches"] },
+  { key: "sports", label: "Sports", color: "#E74C3C", keywords: ["sports", "athletes", "teams", "football", "baseball", "basketball", "soccer", "olympics", "tennis", "stadiums", "arenas"] },
   { key: "other", label: "Other", color: "#7B8794", keywords: [] },
 ];
 
 // dom refs
 const refs = {
+  appViewport: document.getElementById("appViewport"),
   appShell: document.getElementById("appShell"),
   titleScreen: document.getElementById("titleScreen"),
   appTabs: document.getElementById("appTabs"),
@@ -52,9 +60,12 @@ const refs = {
   statusPill: document.querySelector(".discover-status-pill"),
   statusText: document.getElementById("statusText"),
   devModeButton: document.getElementById("devModeButton"),
-  resultCount: document.getElementById("resultCount"),
+  nearbyTabBadge: document.getElementById("nearbyTabBadge"),
   collectionCount: document.getElementById("collectionCount"),
   strengthCount: document.getElementById("strengthCount"),
+  insightInfoButton: document.getElementById("insightInfoButton"),
+  popularityTotalCount: document.getElementById("popularityTotalCount"),
+  popularityInfoButton: document.getElementById("popularityInfoButton"),
   articleList: document.getElementById("articleList"),
   collectionList: document.getElementById("collectionList"),
   folderList: document.getElementById("folderList"),
@@ -77,6 +88,7 @@ const refs = {
   modalImageFallback: document.getElementById("modalImageFallback"),
   modalCategory: document.getElementById("modalCategory"),
   modalQuality: document.getElementById("modalQuality"),
+  modalPopularity: document.getElementById("modalPopularity"),
   modalDate: document.getElementById("modalDate"),
   modalLocation: document.getElementById("modalLocation"),
   modalSummary: document.getElementById("modalSummary"),
@@ -108,6 +120,7 @@ const uiState = {
   awaitingLocationFix: false,
   locationTroubleShown: false,
   devMode: false,
+  devFogTrailRecording: false,
   selectedFolderIcon: "star",
   expandedCollectionIds: new Set(),
   modalPageId: null,
@@ -119,7 +132,10 @@ const uiState = {
     unlockedPageId: null,
     waitingForArticles: false,
   },
-  qualityRequests: new Set(),
+  wikiRankRequests: new Set(),
+  wikiRankQueue: [],
+  wikiRankQueueSet: new Set(),
+  wikiRankInflight: 0,
   locationRequests: new Set(),
 };
 
@@ -129,11 +145,11 @@ const map = new mapboxgl.Map({
   style: "mapbox://styles/mapbox/light-v11",
   center: defaultCenter,
   zoom: 15.4,
-  pitch: 0,
-  bearing: 0,
+  pitchWithRotate: false,
+  dragRotate: false,
 });
 
-map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), "top-right");
+map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
 
 const articlePopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 16 });
 let userLocationMarker = null;
@@ -147,7 +163,8 @@ let mapLayersInitialized = false;
 setupStaticUi();
 renderFolderIconPicker();
 renderAll();
-requestMissingMetadataForArticles(getUnlockedArticles().slice(0, 12));
+requestMissingMetadataForArticles(getUnlockedArticles());
+refreshMissingCategoriesForUnlockedArticles();
 
 map.on("load", () => {
   mapIsReady = true;
@@ -160,14 +177,29 @@ map.on("zoom", renderFogOverlay);
 map.on("resize", renderFogOverlay);
 map.on("click", handleDevMapClick);
 
+setupViewportResizeObserver();
+
+function setupViewportResizeObserver() {
+  const root = refs.appViewport;
+  if (!root || typeof ResizeObserver === "undefined") return;
+  const ro = new ResizeObserver(() => {
+    if (!mapIsReady) return;
+    map.resize();
+    renderFogOverlay();
+  });
+  ro.observe(root);
+}
+
 // static events
 function setupStaticUi() {
   refs.discoverButton?.addEventListener("click", enterDiscoverView);
   refs.viewCollectionButton?.addEventListener("click", () => {
     if (!getUnlockedArticles().length) return showTitleNotice("Unlock an article in Discover before viewing your collection.");
-    showAppView("collection");
+    enterCollectionViewFromTitle();
   });
   refs.refreshButton?.addEventListener("click", () => locateAndLoadArticles({ forceRefresh: true, recenter: true }));
+  refs.insightInfoButton?.addEventListener("click", showInsightInfo);
+  refs.popularityInfoButton?.addEventListener("click", showPopularityInfo);
   refs.recenterButton?.addEventListener("click", () => {
     map.flyTo({ center: uiState.currentCenter, zoom: 15.8, essential: true });
   });
@@ -257,7 +289,7 @@ function setupStaticUi() {
 
 // saved state
 function loadState() {
-  const emptyState = { unlockedArticles: {}, folders: [] };
+  const emptyState = { unlockedArticles: {}, folders: [], fogTrailSamples: [] };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return ensureSystemFolders(emptyState);
@@ -268,6 +300,7 @@ function loadState() {
     return ensureSystemFolders({
       unlockedArticles,
       folders: Array.isArray(parsed?.folders) ? parsed.folders.map(normalizeFolder).filter(Boolean) : [],
+      fogTrailSamples: parsed?.fogTrailSamples,
     });
   } catch (error) {
     console.error("Failed to load state", error);
@@ -286,15 +319,55 @@ function normalizeFolder(folder) {
   };
 }
 
+function normalizeFogTrailSamples(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const entry of raw) {
+    let lng;
+    let lat;
+    if (Array.isArray(entry) && entry.length >= 2) {
+      lng = Number(entry[0]);
+      lat = Number(entry[1]);
+    } else if (entry && typeof entry === "object") {
+      lng = Number(entry.lng ?? entry.longitude);
+      lat = Number(entry.lat ?? entry.latitude);
+    }
+    if (Number.isFinite(lng) && Number.isFinite(lat)) out.push({ lng, lat });
+  }
+  return out.length > MAX_FOG_TRAIL_SAMPLES ? out.slice(out.length - MAX_FOG_TRAIL_SAMPLES) : out;
+}
+
 function ensureSystemFolders(state) {
   const favorites = { id: "favorites", name: "Favorites", iconKey: "heart", system: true };
   const folders = Array.isArray(state.folders) ? state.folders.filter(Boolean).filter((folder) => folder.id !== "favorites") : [];
-  return { unlockedArticles: state.unlockedArticles ?? {}, folders: [favorites, ...folders] };
+  return {
+    unlockedArticles: state.unlockedArticles ?? {},
+    folders: [favorites, ...folders],
+    fogTrailSamples: normalizeFogTrailSamples(state.fogTrailSamples),
+  };
 }
 
 // article state
 function normalizeUnlockedArticle(article) {
   const category = getCategoryDefinition(article?.categoryKey);
+  const popularityMetricOk = article?.popularityMetric === WIKIRANK_POPULARITY_METRIC;
+
+  let popularity =
+    popularityMetricOk && Number.isFinite(article?.popularity) ? Math.max(0, Math.round(article.popularity)) : null;
+
+  let popularityStatus;
+  if (!popularityMetricOk) {
+    popularityStatus = article?.popularityStatus === "loading" ? "loading" : "idle";
+  } else if (article?.popularityStatus === "error") {
+    popularityStatus = "error";
+  } else if (Number.isFinite(popularity)) {
+    popularityStatus = "ready";
+  } else if (article?.popularityStatus === "loading") {
+    popularityStatus = "loading";
+  } else {
+    popularityStatus = "idle";
+  }
+
   return {
     pageid: String(article?.pageid ?? ""),
     title: String(article?.title ?? "Unknown article"),
@@ -307,6 +380,9 @@ function normalizeUnlockedArticle(article) {
     folderIds: Array.isArray(article?.folderIds) ? article.folderIds.map(String) : [],
     quality: Number.isFinite(article?.quality) ? Math.max(1, Math.round(article.quality)) : null,
     qualityStatus: article?.qualityStatus === "error" ? "error" : Number.isFinite(article?.quality) ? "ready" : article?.qualityStatus === "loading" ? "loading" : "idle",
+    popularity,
+    popularityStatus,
+    popularityMetric: popularityMetricOk ? WIKIRANK_POPULARITY_METRIC : null,
     location: normalizeLocation(article?.location),
     categoryKey: category.key,
     categoryLabel: String(article?.categoryLabel || category.label),
@@ -340,14 +416,65 @@ function getCategoryDefinition(key) {
   return CATEGORY_DEFINITIONS.find((entry) => entry.key === key) || CATEGORY_DEFINITIONS[CATEGORY_DEFINITIONS.length - 1];
 }
 
+function normalizeCategoryTitle(title) {
+  return String(title || "").replace(/^Category:/i, "").toLowerCase().trim();
+}
+
+function isMaintenanceCategory(name) {
+  // skip wikipedia cleanup categories before scoring
+  return [
+    "all articles",
+    "all wikipedia",
+    "articles containing",
+    "articles needing",
+    "articles to be",
+    "articles using",
+    "articles with",
+    "cs1",
+    "commons category",
+    "coordinates on wikidata",
+    "pages using",
+    "pages with",
+    "short description",
+    "use american english",
+    "use dmy dates",
+    "use mdy dates",
+    "webarchive",
+    "wikipedia articles",
+  ].some((phrase) => name.includes(phrase));
+}
+
+function getCleanCategoryNames(page) {
+  return (page?.categoryTitles ?? page?.categories?.map((entry) => entry.title) ?? [])
+    .map(normalizeCategoryTitle)
+    .filter((name) => name && !isMaintenanceCategory(name));
+}
+
+function scoreCategoryDefinition(definition, categoryNames, fallbackText) {
+  return definition.keywords.reduce((score, keyword) => {
+    const normalizedKeyword = keyword.toLowerCase();
+    const categoryHits = categoryNames.filter((name) => name.includes(normalizedKeyword)).length;
+    const fallbackHit = fallbackText.includes(normalizedKeyword) ? 1 : 0;
+    return score + categoryHits * 3 + fallbackHit;
+  }, 0);
+}
+
 function inferCategory(page) {
-  // match category names to broad app buckets
-  const names = (page?.categories ?? []).map((entry) => String(entry.title || "").replace(/^Category:/i, "").toLowerCase());
+  const categoryNames = getCleanCategoryNames(page);
+  const fallbackText = `${page?.title || ""} ${page?.extract || ""}`.toLowerCase();
+  let bestCategory = CATEGORY_DEFINITIONS[CATEGORY_DEFINITIONS.length - 1];
+  let bestScore = 0;
+
   for (const definition of CATEGORY_DEFINITIONS) {
     if (definition.key === "other") continue;
-    if (names.some((name) => definition.keywords.some((keyword) => name.includes(keyword)))) return definition;
+    const score = scoreCategoryDefinition(definition, categoryNames, fallbackText);
+    if (score > bestScore) {
+      bestCategory = definition;
+      bestScore = score;
+    }
   }
-  return CATEGORY_DEFINITIONS[CATEGORY_DEFINITIONS.length - 1];
+
+  return bestCategory;
 }
 
 // location helpers
@@ -497,6 +624,7 @@ async function enterDiscoverView() {
   }
   clearTitleNotice();
   refs.discoverButton.disabled = true;
+  if (refs.viewCollectionButton) refs.viewCollectionButton.disabled = true;
   setTitleLocationLoading(true);
   uiState.locationTroubleShown = false;
   uiState.awaitingLocationFix = true;
@@ -521,6 +649,42 @@ async function enterDiscoverView() {
   } finally {
     setTitleLocationLoading(false);
     refs.discoverButton.disabled = false;
+    if (refs.viewCollectionButton) refs.viewCollectionButton.disabled = !getUnlockedArticles().length;
+  }
+}
+
+async function enterCollectionViewFromTitle() {
+  if (!navigator.geolocation) {
+    showTitleScreen("Collection needs location access, but this browser does not support geolocation.");
+    return;
+  }
+
+  clearTitleNotice();
+  refs.discoverButton.disabled = true;
+  if (refs.viewCollectionButton) refs.viewCollectionButton.disabled = true;
+  setTitleLocationLoading(true);
+  uiState.locationTroubleShown = false;
+  uiState.awaitingLocationFix = true;
+
+  try {
+    const position = await waitForInitialLocationOnTitle();
+    if (!position) return;
+    // collection still needs live location for nearby alerts
+    showAppView("collection");
+    await applyLocationPosition(position, { forceRefresh: true, recenter: true });
+    startLocationTracking();
+  } catch (error) {
+    if (error?.code === 1) {
+      console.error(error);
+      showTitleScreen(getLocationFailureMessage(error));
+      return;
+    }
+    console.warn("Initial collection location request stopped.", error);
+    showTitleScreen(getLocationFailureMessage(error));
+  } finally {
+    setTitleLocationLoading(false);
+    refs.discoverButton.disabled = false;
+    if (refs.viewCollectionButton) refs.viewCollectionButton.disabled = !getUnlockedArticles().length;
   }
 }
 
@@ -544,9 +708,9 @@ function positionToCenter(position) {
 
 // page status
 function setStatus(message, state = "loading") {
-  refs.statusText.textContent = message;
-  refs.statusText.className = `status-text ${state}`;
-  refs.statusPill?.classList.toggle("is-hidden", uiState.activeTab === "discover" && state === "success" && !uiState.devMode);
+  // refs.statusText.textContent = message;
+  // refs.statusText.className = `status-text ${state}`;
+  // refs.statusPill?.classList.toggle("is-hidden", uiState.activeTab === "discover" && state === "success" && !uiState.devMode);
 }
 
 function showLocationTroublePopup() {
@@ -611,7 +775,7 @@ function getSpotlightRect({ target = null }) {
       bottom: rect.bottom,
       width: rect.width,
       height: rect.height,
-      radius: window.getComputedStyle(target).borderRadius || "18px",
+      // radius: window.getComputedStyle(target).borderRadius || "18px",
     };
   }
   return null;
@@ -636,22 +800,18 @@ function setTutorialSpotlight(rect) {
   const bottom = Math.min(window.innerHeight, rect.bottom + pad);
   const width = Math.max(0, right - left);
   const height = Math.max(0, bottom - top);
-  const [topScrim, rightScrim, bottomScrim, leftScrim] = refs.tutorialScrims;
 
   refs.tutorialBackdrop?.classList.add("is-hidden");
-  refs.tutorialScrims.forEach((scrim) => scrim.classList.remove("is-hidden"));
-  Object.assign(topScrim.style, { left: "0px", top: "0px", width: "100vw", height: `${top}px` });
-  Object.assign(rightScrim.style, { left: `${right}px`, top: `${top}px`, width: `${window.innerWidth - right}px`, height: `${height}px` });
-  Object.assign(bottomScrim.style, { left: "0px", top: `${bottom}px`, width: "100vw", height: `${window.innerHeight - bottom}px` });
-  Object.assign(leftScrim.style, { left: "0px", top: `${top}px`, width: `${left}px`, height: `${height}px` });
+  refs.tutorialScrims.forEach((scrim) => scrim.classList.add("is-hidden"));
 
   Object.assign(refs.tutorialHighlight.style, {
     left: `${left}px`,
     top: `${top}px`,
     width: `${width}px`,
     height: `${height}px`,
-    borderRadius: rect.radius,
+    // borderRadius: rect.radius,
   });
+  refs.tutorialHighlight.style.removeProperty("border-radius");
   refs.tutorialHighlight.classList.remove("is-hidden");
 }
 
@@ -769,6 +929,34 @@ function markerLegend() {
   `;
 }
 
+function showPopularityInfo() {
+  showTutorial({
+    title: "What is Popularity?",
+    body: `
+      <p>Popularity is your combined WikiRank popularity footprint across collected articles.</p>
+      <p>The WikiRank API reports English popularity as a flat reference (100 for nearly every article), so discoverWiki instead sums WikiRank popularity from every <em>other</em> language edition linked for that topic — wider translation footprints score higher.</p>
+      <p><a href="https://wikirank.net/" target="_blank" rel="noopener noreferrer">Learn more on WikiRank</a></p>
+    `,
+    buttonText: "OK",
+    target: refs.popularityInfoButton?.closest(".stat-card"),
+    onButton: hideTutorial,
+  });
+}
+
+function showInsightInfo() {
+  showTutorial({
+    title: "What is Insight?",
+    body: `
+      <p>Insight is your total collection quality score.</p>
+      <p>Each article gets a quality score from WikiRank, and Insight adds those scores together for every article you've collected.</p>
+      <p><a href="https://wikirank.net/" target="_blank" rel="noopener noreferrer">Learn more on WikiRank</a></p>
+    `,
+    buttonText: "OK",
+    target: refs.insightInfoButton?.closest(".stat-card"),
+    onButton: hideTutorial,
+  });
+}
+
 function showNearestArticleTutorial() {
   const article = getTutorialTargetArticle();
   if (!article) {
@@ -859,7 +1047,7 @@ function showCollectionControlTutorial(index = 0) {
   const steps = [
     {
       title: "Sort articles",
-      body: "<p>Sort your collection by date, quality, category, or location.</p>",
+      body: "<p>Sort your collection by date, quality, popularity, category, or location.</p>",
       target: refs.collectionSort,
     },
     {
@@ -893,11 +1081,10 @@ function showCollectionArticleTutorial() {
   uiState.tutorial.step = "show-details";
   showTutorial({
     title: "Show details",
-    body: "<p>Show details opens the article summary, quality, category, folders, and link.</p>",
+      body: "<p>Show details opens the article summary, quality and popularity scores, category, folders, and link.</p>",
     target: detailsButton,
     buttonText: "Next",
     onButton: () => {
-      if (pageid && !uiState.expandedCollectionIds.has(pageid)) handleCollectionAction("toggle-expand", pageid);
       window.setTimeout(showShowOnMapTutorial, 150);
     },
   });
@@ -932,14 +1119,16 @@ function stopLocationTracking() {
   locationWatchId = null;
 }
 
-function activateDev() {
+function activateDev(persistentFogRecording = false) {
   uiState.devMode = true;
+  uiState.devFogTrailRecording = Boolean(persistentFogRecording);
   stopLocationTracking();
   refs.appShell?.classList.add("is-dev-mode");
   refs.devModeButton?.classList.remove("is-hidden");
-  setStatus("dev mode active", "success");
+  const fogHint = uiState.devFogTrailRecording ? " (persistent fog recording on)" : "";
+  setStatus(`dev mode active${fogHint}`, "success");
   renderAll();
-  console.info("dev mode active");
+  console.info("dev mode active", { persistentFogRecording: uiState.devFogTrailRecording });
 }
 
 window.activateDev = activateDev;
@@ -1022,7 +1211,84 @@ function updateNearbyArticlesFromState() {
   uiState.nearbyArticles = uiState.nearbyArticles.map(decorateArticleWithState);
 }
 
+async function refreshMissingCategoriesForUnlockedArticles() {
+  const articles = getUnlockedArticles().filter((article) => article.categoryKey === "other");
+  if (!articles.length) return;
+
+  try {
+    const categoriesByPage = await fetchWikipediaCategories(articles.map((article) => article.pageid));
+    let didChange = false;
+
+    articles.forEach((article) => {
+      const category = inferCategory({
+        ...article,
+        categoryTitles: categoriesByPage.get(String(article.pageid)) ?? [],
+      });
+      if (category.key === "other") return;
+
+      article.categoryKey = category.key;
+      article.categoryLabel = category.label;
+      article.categoryColor = category.color;
+      didChange = true;
+    });
+
+    if (!didChange) return;
+    persistState();
+    updateNearbyArticlesFromState();
+    renderAll();
+  } catch (error) {
+    console.warn("Saved article categories could not be refreshed.", error);
+  }
+}
+
 // wiki api
+async function fetchWikipediaCategories(pageIds) {
+  if (!pageIds.length) return new Map();
+  const categoriesByPage = new Map(pageIds.map((pageId) => [String(pageId), []]));
+  const seenByPage = new Map(pageIds.map((pageId) => [String(pageId), new Set()]));
+  let continueParams = {};
+
+  for (let requestCount = 0; requestCount < 8; requestCount += 1) {
+    const categoryUrl = new URL("https://en.wikipedia.org/w/api.php");
+    categoryUrl.search = new URLSearchParams({
+      action: "query",
+      pageids: pageIds.join("|"),
+      prop: "categories",
+      cllimit: "max",
+      format: "json",
+      origin: "*",
+      ...continueParams,
+    }).toString();
+
+    const response = await fetch(categoryUrl.toString());
+    if (!response.ok) throw new Error(`Wikipedia category request failed with status ${response.status}`);
+    const data = await response.json();
+    const pages = data?.query?.pages ?? {};
+
+    Object.values(pages).forEach((page) => {
+      const pageId = String(page.pageid ?? "");
+      const categories = categoriesByPage.get(pageId);
+      const seen = seenByPage.get(pageId);
+      if (!categories || !seen) return;
+
+      (page.categories ?? []).forEach((category) => {
+        const title = String(category.title || "");
+        if (!title || seen.has(title)) return;
+        seen.add(title);
+        categories.push(title);
+      });
+    });
+
+    if (!data?.continue?.clcontinue) break;
+    continueParams = {
+      continue: data.continue.continue ?? "",
+      clcontinue: data.continue.clcontinue,
+    };
+  }
+
+  return categoriesByPage;
+}
+
 async function fetchWikipediaArticles(center) {
   // geosearch finds nearby page ids
   const searchUrl = new URL("https://en.wikipedia.org/w/api.php");
@@ -1036,14 +1302,23 @@ async function fetchWikipediaArticles(center) {
 
   // second request gets details in one batch
   const detailUrl = new URL("https://en.wikipedia.org/w/api.php");
-  detailUrl.search = new URLSearchParams({ action: "query", pageids: pageIds.join("|"), prop: "extracts|pageimages|info|categories", exintro: "1", explaintext: "1", exsentences: "3", pithumbsize: "600", inprop: "url", cllimit: "10", clshow: "!hidden", format: "json", origin: "*" }).toString();
+  detailUrl.search = new URLSearchParams({ action: "query", pageids: pageIds.join("|"), prop: "extracts|pageimages|info", exintro: "1", explaintext: "1", exsentences: "3", pithumbsize: "600", inprop: "url", format: "json", origin: "*" }).toString();
   const detailResponse = await fetch(detailUrl.toString());
   if (!detailResponse.ok) throw new Error(`Wikipedia detail request failed with status ${detailResponse.status}`);
   const detailData = await detailResponse.json();
   const pages = detailData?.query?.pages ?? {};
+  let categoriesByPage = new Map();
+  try {
+    categoriesByPage = await fetchWikipediaCategories(pageIds);
+  } catch (error) {
+    console.warn("Wikipedia categories could not be loaded.", error);
+  }
 
   return searchResults.map((result) => {
-    const page = pages[String(result.pageid)] ?? {};
+    const page = {
+      ...(pages[String(result.pageid)] ?? {}),
+      categoryTitles: categoriesByPage.get(String(result.pageid)) ?? [],
+    };
     const category = inferCategory(page);
     const coordinates = [result.lon, result.lat];
     // distance is always from current user center
@@ -1119,12 +1394,18 @@ function showAppView(view) {
 
 function renderTabs() {
   const hasCollection = getUnlockedArticles().length > 0;
+  const nearbyCount = uiState.nearbyArticles.filter((article) => !article.unlocked && canUnlockArticle(article)).length;
   refs.tabButtons.forEach((button) => {
     // collection stays locked until first article
     const tab = button.dataset.tab === "collection" ? "collection" : "discover";
     button.classList.toggle("is-active", tab === uiState.activeTab);
     if (tab === "collection") button.disabled = !hasCollection;
   });
+  if (refs.nearbyTabBadge) {
+    refs.nearbyTabBadge.textContent = String(nearbyCount);
+    refs.nearbyTabBadge.setAttribute("aria-label", `${nearbyCount} nearby articles`);
+    refs.nearbyTabBadge.classList.toggle("is-hidden", uiState.activeTab !== "collection" || nearbyCount === 0);
+  }
   refs.scopeButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.scope === uiState.collectionScope));
   refs.titleScreen?.classList.toggle("is-hidden", uiState.activeTab !== "title");
   refs.appTabs?.classList.toggle("is-hidden", uiState.activeTab === "title");
@@ -1141,10 +1422,12 @@ function renderTabs() {
 // header stats
 function renderHeaderStats() {
   const hasCollection = getUnlockedArticles().length > 0;
-  // strength is the sum of article quality
-  refs.resultCount.textContent = String(uiState.nearbyArticles.length);
+  // insight = sum of WikiRank quality; popularity stat = sum of international WikiRank popularity (excluding broken EN constant)
   refs.collectionCount.textContent = String(getUnlockedArticles().length);
   refs.strengthCount.textContent = String(getUnlockedArticles().reduce((sum, article) => sum + (Number.isFinite(article.quality) ? article.quality : 0), 0));
+  if (refs.popularityTotalCount) {
+    refs.popularityTotalCount.textContent = String(getUnlockedArticles().reduce((sum, article) => sum + (Number.isFinite(article.popularity) ? article.popularity : 0), 0));
+  }
   if (refs.viewCollectionButton) {
     refs.viewCollectionButton.disabled = !hasCollection;
     refs.viewCollectionButton.title = hasCollection ? "" : "Unlock an article first";
@@ -1155,6 +1438,13 @@ function renderHeaderStats() {
 function buildArticleMedia(article, locked) {
   if (!locked && article.thumbnail) return `<img src="${escapeHtml(article.thumbnail)}" alt="${escapeHtml(article.title)} preview" />`;
   return '<div class="article-card__placeholder"><i class="bi bi-question-lg" aria-hidden="true"></i></div>';
+}
+
+function buildPopularityLabel(article) {
+  if (Number.isFinite(article.popularity)) return `Popularity ${article.popularity}`;
+  if (article.popularityStatus === "loading") return "Popularity evaluating...";
+  if (article.popularityStatus === "error") return "Popularity unavailable";
+  return "Popularity pending";
 }
 
 function buildQualityLabel(article) {
@@ -1178,6 +1468,7 @@ function renderExploreArticles() {
     const title = article.unlocked ? article.title : article.lockedTitle;
     const categoryChip = article.unlocked ? `<span class="meta-chip meta-chip--category" style="--chip-color: ${escapeHtml(article.categoryColor)}">${escapeHtml(article.categoryLabel)}</span>` : "";
     const qualityChip = article.unlocked ? `<span class="meta-chip">${escapeHtml(buildQualityLabel(article))}</span>` : "";
+    const popularityChip = article.unlocked ? `<span class="meta-chip">${escapeHtml(buildPopularityLabel(article))}</span>` : "";
     const discoveredChip = article.unlocked ? `<span class="meta-chip"><i class="bi bi-calendar3" aria-hidden="true"></i>${escapeHtml(formatDate(article.discoveredAt))}</span>` : "";
     const primaryAction = article.unlocked
       ? `<button class="primary-button" type="button" data-action="details" data-pageid="${escapeHtml(article.pageid)}">View details</button>`
@@ -1197,6 +1488,7 @@ function renderExploreArticles() {
             <span class="meta-chip"><i class="bi bi-geo-alt" aria-hidden="true"></i>${escapeHtml(formatDistance(article.distanceMiles))}</span>
             ${categoryChip}
             ${qualityChip}
+            ${popularityChip}
             ${discoveredChip}
           </div>
           <div class="card-action-row">${primaryAction}${secondaryAction}</div>
@@ -1204,6 +1496,8 @@ function renderExploreArticles() {
       </article>
     `;
   }).join("");
+
+  requestMissingMetadataForArticles(uiState.nearbyArticles.filter((article) => article.unlocked));
 }
 
 // collection render
@@ -1259,7 +1553,7 @@ function renderCollectionView() {
             </label>
           `;
         }).join("")
-      : '<p class="article-card__summary">Create a custom folder above to sort articles beyond favorites.</p>';
+      : '';
 
     return `
       <!-- collection card -->
@@ -1270,15 +1564,16 @@ function renderCollectionView() {
             <div>
               <h2 class="article-card__title">${escapeHtml(article.title)}</h2>
               <div class="article-card__eyebrow">Discovered ${escapeHtml(formatDate(article.discoveredAt))}</div>
+              <div class="article-card__eyebrow collection-card__location">
+                <i class="bi bi-geo-alt-fill" aria-hidden="true"></i>
+                <span>${escapeHtml(buildLocationLabel(article.location))}</span>
+              </div>
             </div>
             <button class="inline-icon-button ${article.isFavorite ? "is-active" : ""}" type="button" data-action="favorite-toggle" data-pageid="${escapeHtml(article.pageid)}" aria-label="Toggle favorite">
               <i class="bi ${article.isFavorite ? "bi-heart-fill" : "bi-heart"}" aria-hidden="true"></i>
             </button>
           </div>
-          <div class="card-meta-row">
-            <span class="meta-chip">${escapeHtml(buildLocationLabel(article.location))}</span>
-            ${tags}
-          </div>
+          ${tags ? `<div class="card-meta-row">${tags}</div>` : ""}
           <div class="card-action-row">
             <button class="ghost-button" type="button" data-action="toggle-expand" data-pageid="${escapeHtml(article.pageid)}">${expanded ? "Hide details" : "Show details"}</button>
             <button class="ghost-button" type="button" data-action="focus-map" data-pageid="${escapeHtml(article.pageid)}">Show on map</button>
@@ -1288,8 +1583,8 @@ function renderCollectionView() {
             <div class="card-meta-row">
               <span class="meta-chip meta-chip--category" style="--chip-color: ${escapeHtml(article.categoryColor)}">${escapeHtml(article.categoryLabel)}</span>
               <span class="meta-chip">${escapeHtml(buildQualityLabel(article))}</span>
+              <span class="meta-chip">${escapeHtml(buildPopularityLabel(article))}</span>
             </div>
-            <p class="article-card__summary">${escapeHtml(ensureTrailingEllipsis(article.summary))}</p>
             <a class="ghost-button collection-card__article-link" href="${escapeHtml(article.url)}" target="_blank" rel="noopener noreferrer">Open article</a>
             <div class="folder-assignment-list">${assignments}</div>
           </div>
@@ -1298,7 +1593,7 @@ function renderCollectionView() {
     `;
   }).join("");
 
-  requestMissingMetadataForArticles(filteredArticles.slice(0, 18));
+  requestMissingMetadataForArticles(filteredArticles);
 }
 
 function getFolderIcon(iconKey) {
@@ -1356,6 +1651,10 @@ function sortCollectionArticles(articles) {
         return compareNumber(left.quality, right.quality, 1) || compareText(left.title, right.title);
       case "quality-desc":
         return compareNumber(left.quality, right.quality, -1) || compareText(left.title, right.title);
+      case "popularity-asc":
+        return compareNumber(left.popularity, right.popularity, 1) || compareText(left.title, right.title);
+      case "popularity-desc":
+        return compareNumber(left.popularity, right.popularity, -1) || compareText(left.title, right.title);
       case "category":
         return compareText(left.categoryLabel, right.categoryLabel) || compareText(left.title, right.title);
       case "city":
@@ -1503,6 +1802,7 @@ function renderModal() {
   refs.modalCategory.style.setProperty("--chip-color", article.categoryColor);
   refs.modalCategory.classList.add("meta-chip--category");
   refs.modalQuality.textContent = buildQualityLabel(article);
+  if (refs.modalPopularity) refs.modalPopularity.textContent = buildPopularityLabel(article);
   refs.modalDate.textContent = `Discovered ${formatDate(article.discoveredAt)}`;
   refs.modalLocation.textContent = buildLocationLabel(article.location);
   refs.modalCategory.closest(".modal-meta")?.classList.add("is-hidden");
@@ -1546,6 +1846,7 @@ async function unlockArticle(article) {
     isFavorite: false,
     folderIds: [],
     qualityStatus: "loading",
+    popularityStatus: "loading",
     categoryKey: article.categoryKey,
     categoryLabel: article.categoryLabel,
     categoryColor: article.categoryColor,
@@ -1562,51 +1863,113 @@ async function unlockArticle(article) {
     uiState.tutorial.unlockedPageId = String(record.pageid);
   }
   focusArticleOnMap(record);
-  // enrich quality and place after unlock
+  // enrich WikiRank scores and place after unlock
   requestMissingMetadataForArticles([record]);
 }
 
 // article metadata
+function wikiRankInternationalPopularitySum(result, queryLang) {
+  let sum = 0;
+  for (const [code, entry] of Object.entries(result)) {
+    if (code === queryLang || !entry || typeof entry !== "object") continue;
+    const p = entry.popularity;
+    if (Number.isFinite(p)) sum += p;
+  }
+  return sum;
+}
+
+function enqueueWikiRankFetch(pageid) {
+  const id = String(pageid);
+  if (uiState.wikiRankRequests.has(id)) return;
+
+  const record = getUnlockedRecord(id);
+  if (!record) return;
+  const needQuality = !Number.isFinite(record.quality) && record.qualityStatus !== "error";
+  const needPopularity = !Number.isFinite(record.popularity) && record.popularityStatus !== "error";
+  if (!needQuality && !needPopularity) return;
+
+  if (uiState.wikiRankQueueSet.has(id)) return;
+  uiState.wikiRankQueueSet.add(id);
+  uiState.wikiRankQueue.push(id);
+  pumpWikiRankQueue();
+}
+
+function pumpWikiRankQueue() {
+  while (uiState.wikiRankInflight < WIKIRANK_PARALLEL && uiState.wikiRankQueue.length) {
+    const id = uiState.wikiRankQueue.shift();
+    uiState.wikiRankQueueSet.delete(id);
+    uiState.wikiRankInflight++;
+    fetchWikiRankForArticle(id)
+      .catch(() => {})
+      .finally(() => {
+        uiState.wikiRankInflight--;
+        pumpWikiRankQueue();
+      });
+  }
+}
+
 function requestMissingMetadataForArticles(articles) {
   articles.forEach((article) => {
     const record = getUnlockedRecord(article.pageid);
     if (!record) return;
     if (!record.location) fetchLocationForArticle(record.pageid);
-    if (!Number.isFinite(record.quality) && record.qualityStatus !== "error") fetchQualityForArticle(record.pageid);
+    enqueueWikiRankFetch(record.pageid);
   });
 }
 
-async function fetchQualityForArticle(pageid) {
+async function fetchWikiRankForArticle(pageid) {
   const record = getUnlockedRecord(pageid);
-  if (!record || uiState.qualityRequests.has(pageid) || Number.isFinite(record.quality)) return;
+  if (!record || uiState.wikiRankRequests.has(pageid)) return;
 
-  uiState.qualityRequests.add(pageid);
-  record.qualityStatus = "loading";
+  const needQuality = !Number.isFinite(record.quality) && record.qualityStatus !== "error";
+  const needPopularity = !Number.isFinite(record.popularity) && record.popularityStatus !== "error";
+  if (!needQuality && !needPopularity) return;
+
+  uiState.wikiRankRequests.add(pageid);
+  if (needQuality) record.qualityStatus = "loading";
+  if (needPopularity) record.popularityStatus = "loading";
   persistState();
   renderAll();
 
   try {
-    // quality uses local proxy to avoid cors
     const url = new URL(WIKIRANK_PROXY_PATH, window.location.href);
-    url.search = new URLSearchParams({ name: record.title, lang: "en" }).toString();
+    url.search = new URLSearchParams({ name: record.title, lang: WIKIRANK_QUERY_LANG }).toString();
     const response = await fetch(url.toString());
     if (response.status === 404) {
-      throw new Error("WikiRank proxy not found. Start DiscoverWiki with `python server.py`.");
+      throw new Error("WikiRank proxy not found. Start discoverWiki with `python server.py`.");
     }
     if (!response.ok) throw new Error(`WikiRank request failed with status ${response.status}`);
     const data = await response.json();
-    const score = data?.result?.en?.quality;
-    if (!Number.isFinite(score)) throw new Error("WikiRank did not return an English score.");
-    record.quality = Math.max(1, Math.round(score));
-    record.qualityStatus = "ready";
-  } catch (error) {
-    console.error(`Failed to fetch WikiRank quality for ${record.title}`, error);
-    if (String(error?.message || "").includes("python server.py")) {
-      setStatus("WikiRank quality needs the local proxy. Start the app with `python server.py`.", "error");
+    const resultObj = data?.result;
+    const en = typeof resultObj === "object" && resultObj !== null ? resultObj.en : null;
+    const q = en?.quality;
+
+    if (needQuality) {
+      if (Number.isFinite(q)) {
+        record.quality = Math.max(1, Math.round(q));
+        record.qualityStatus = "ready";
+      } else {
+        record.qualityStatus = "error";
+      }
     }
-    record.qualityStatus = "error";
+    if (needPopularity) {
+      if (typeof resultObj === "object" && resultObj !== null) {
+        record.popularity = Math.max(0, Math.round(wikiRankInternationalPopularitySum(resultObj, WIKIRANK_QUERY_LANG)));
+        record.popularityMetric = WIKIRANK_POPULARITY_METRIC;
+        record.popularityStatus = "ready";
+      } else {
+        record.popularityStatus = "error";
+      }
+    }
+  } catch (error) {
+    console.error(`Failed to fetch WikiRank data for ${record.title}`, error);
+    if (String(error?.message || "").includes("python server.py")) {
+      setStatus("WikiRank needs the local proxy. Start the app with `python server.py`.", "error");
+    }
+    if (needQuality) record.qualityStatus = "error";
+    if (needPopularity) record.popularityStatus = "error";
   } finally {
-    uiState.qualityRequests.delete(pageid);
+    uiState.wikiRankRequests.delete(pageid);
     persistState();
     renderAll();
   }
@@ -1689,6 +2052,7 @@ async function applyLocationPosition(position, { forceRefresh = false, recenter 
   uiState.awaitingLocationFix = false;
   clearLocationHelpTimer();
   uiState.currentCenter = center;
+  recordFogTrailSample(center);
   setUserLocationMarker(center);
   updateNearbyArticleDistances(center);
   renderAll();
@@ -1947,6 +2311,7 @@ function ensureMapLayers() {
     id: "locked-articles-glow",
     type: "circle",
     source: "locked-articles",
+    minzoom: 11.5,
     paint: {
       "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 11, 14, 18, 17, 24],
       "circle-color": ["case", ["boolean", ["get", "unlockable"], false], "#ff8f3d", "#b6b4b1"],
@@ -1960,6 +2325,7 @@ function ensureMapLayers() {
     id: "locked-articles-circle",
     type: "circle",
     source: "locked-articles",
+    minzoom: 11.5,
     paint: {
       "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 5, 14, 7, 17, 9],
       "circle-color": ["case", ["boolean", ["get", "unlockable"], false], "#ffe1c9", "#d4d0cc"],
@@ -1973,6 +2339,7 @@ function ensureMapLayers() {
     id: "locked-articles-label",
     type: "symbol",
     source: "locked-articles",
+    minzoom: 11.5,
     layout: {
       "text-field": "?",
       "text-size": ["interpolate", ["linear"], ["zoom"], 8, 13, 15, 16],
@@ -1989,6 +2356,7 @@ function ensureMapLayers() {
     id: "unlocked-articles-circle",
     type: "circle",
     source: "unlocked-articles",
+    minzoom: 11.5,
     paint: {
       "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 4, 12, 7, 16, 10],
       "circle-color": ["get", "color"],
@@ -2056,40 +2424,97 @@ function renderMapData() {
 }
 
 function milesToPixelRadius(miles, coordinates) {
-  // convert real radius to current screen pixels
-  const latitude = coordinates[1];
-  const longitudeOffset = miles / (69.172 * Math.max(Math.cos((latitude * Math.PI) / 180), 0.15));
-  const pointA = map.project(coordinates);
-  const pointB = map.project([coordinates[0] + longitudeOffset, coordinates[1]]);
-  return Math.abs(pointB.x - pointA.x);
+  // Real-world miles → screen pixels at current zoom (scales when zoom changes).
+  const lat = coordinates[1];
+  const lon = coordinates[0];
+  const milesPerDegLat = 69.172;
+  const milesPerDegLon = 69.172 * Math.max(Math.cos((lat * Math.PI) / 180), 0.15);
+  const dLat = miles / milesPerDegLat;
+  const dLon = miles / milesPerDegLon;
+  const center = map.project(coordinates);
+  const east = map.project([lon + dLon, lat]);
+  const north = map.project([lon, lat + dLat]);
+  const rx = Math.abs(east.x - center.x);
+  const ry = Math.abs(north.y - center.y);
+  return (rx + ry) / 2;
+}
+
+function pointIsNearViewport(point, width, height, padding) {
+  return point.x >= -padding && point.x <= width + padding && point.y >= -padding && point.y <= height + padding;
+}
+
+function recordFogTrailSample(center) {
+  if (uiState.devMode && !uiState.devFogTrailRecording) return;
+  const lng = center[0];
+  const lat = center[1];
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+  if (!Array.isArray(appState.fogTrailSamples)) appState.fogTrailSamples = [];
+
+  const here = [lng, lat];
+  const samples = appState.fogTrailSamples;
+  if (samples.length) {
+    const last = samples[samples.length - 1];
+    if (getDistanceMiles(here, [last.lng, last.lat]) < FOG_TRAIL_DEDUPE_MILES) return;
+  }
+  const overlapsExisting = samples.some((s) => getDistanceMiles(here, [s.lng, s.lat]) < FOG_TRAIL_DEDUPE_MILES);
+  if (overlapsExisting) return;
+
+  samples.push({ lng, lat });
+  if (samples.length > MAX_FOG_TRAIL_SAMPLES) {
+    samples.splice(0, samples.length - MAX_FOG_TRAIL_SAMPLES);
+  }
+  persistState();
+  if (mapIsReady) renderFogOverlay();
 }
 
 // fog overlay
 function renderFogOverlay() {
   if (!mapIsReady || !refs.fogOverlay) return;
-  if (uiState.devMode) {
-    refs.fogOverlay.innerHTML = "";
-    return;
-  }
   const width = map.getContainer().clientWidth;
   const height = map.getContainer().clientHeight;
   if (!width || !height) return;
+  const fogPadding = 240;
 
-  const circles = getUnlockedArticles().map((article) => {
-    // each collected article clears nearby fog
-    const point = map.project(article.coordinates);
-    const radius = Math.max(42, milesToPixelRadius(DISCOVER_RADIUS_MILES, article.coordinates));
-    if (point.x < -radius || point.x > width + radius || point.y < -radius || point.y > height + radius) return "";
-    return `<circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${radius.toFixed(1)}" fill="black"></circle>`;
-  }).join("");
+  const articleHoles = getUnlockedArticles()
+    .map((article) => {
+      const point = map.project(article.coordinates);
+      const radiusPx = milesToPixelRadius(DISCOVER_RADIUS_MILES, article.coordinates);
+      const radius = Math.max(3, radiusPx);
+      if (!pointIsNearViewport(point, width, height, radius + fogPadding)) return null;
+      return { point, radius };
+    })
+    .filter(Boolean);
+
+  const trailHoles = (appState.fogTrailSamples ?? []).map((sample) => {
+    const coordinates = [sample.lng, sample.lat];
+    const point = map.project(coordinates);
+    const radiusPx = milesToPixelRadius(FOG_TRAIL_RADIUS_MILES, coordinates);
+    const radius = Math.max(3, radiusPx);
+    if (!pointIsNearViewport(point, width, height, radius + fogPadding)) return null;
+    return { point, radius };
+  }).filter(Boolean);
+
+  const holes = articleHoles.concat(trailHoles);
+
+  const maxHoleRadius = holes.reduce((max, hole) => Math.max(max, hole.radius), 0);
+  const blurStd = holes.length ? Math.min(26, Math.max(4, maxHoleRadius * 0.2)) : 12;
+
+  const circles = holes
+    .map(
+      ({ point, radius }) =>
+        `<circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${radius.toFixed(1)}" fill="black"></circle>`,
+    )
+    .join("");
 
   refs.fogOverlay.setAttribute("viewBox", `0 0 ${width} ${height}`);
   // white mask keeps fog black except cleared circles
   refs.fogOverlay.innerHTML = `
     <defs>
-      <filter id="fogBlur"><feGaussianBlur stdDeviation="18"></feGaussianBlur></filter>
-      <mask id="fogMask">
-        <rect width="${width}" height="${height}" fill="white"></rect>
+      <filter id="fogBlur" x="-100%" y="-100%" width="300%" height="300%">
+        <feGaussianBlur stdDeviation="${blurStd.toFixed(2)}"></feGaussianBlur>
+      </filter>
+      <mask id="fogMask" x="${-fogPadding}" y="${-fogPadding}" width="${width + fogPadding * 2}" height="${height + fogPadding * 2}" maskUnits="userSpaceOnUse">
+        <rect x="${-fogPadding}" y="${-fogPadding}" width="${width + fogPadding * 2}" height="${height + fogPadding * 2}" fill="white"></rect>
         <g filter="url(#fogBlur)">${circles}</g>
       </mask>
     </defs>
