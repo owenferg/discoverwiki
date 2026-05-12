@@ -32,6 +32,9 @@ const FOLDER_ICON_OPTIONS = [
   { key: "pin", className: "bi-pin-map-fill", label: "Pin" },
 ];
 
+/** `data-folder-id` value for the “All articles” chip (not a real folder). */
+const COLLECTION_ALL_FOLDER_ID = "__all__";
+
 // article categories
 const CATEGORY_DEFINITIONS = [
   { key: "people", label: "People", color: "#D4A017", keywords: ["births", "deaths", "people", "person", "biographies", "actors", "artists", "writers", "politicians", "mayors", "governors", "architects", "musicians", "athletes"] },
@@ -78,7 +81,6 @@ const refs = {
   mapSearchForm: document.getElementById("mapSearchForm"),
   mapSearchInput: document.getElementById("mapSearchInput"),
   tabButtons: Array.from(document.querySelectorAll("[data-tab]")),
-  scopeButtons: Array.from(document.querySelectorAll("[data-scope]")),
   exploreView: document.getElementById("exploreView"),
   collectionView: document.getElementById("collectionView"),
   modalShell: document.getElementById("articleModal"),
@@ -215,13 +217,6 @@ function setupStaticUi() {
     });
   });
 
-  refs.scopeButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      uiState.collectionScope = button.dataset.scope === "folders" ? "folders" : "all";
-      renderCollectionView();
-    });
-  });
-
   refs.collectionSort?.addEventListener("change", () => {
     uiState.collectionSort = refs.collectionSort.value;
     renderCollectionView();
@@ -253,25 +248,19 @@ function setupStaticUi() {
 
   refs.collectionList?.addEventListener("click", (event) => {
     const actionTarget = event.target.closest("[data-action]");
-    const card = event.target.closest(".article-card[data-pageid]");
     if (actionTarget) return handleCollectionAction(actionTarget.dataset.action, actionTarget.dataset.pageid, actionTarget.dataset.folderId);
-    if (card && !event.target.closest("a") && !event.target.closest("input")) showModal(card.dataset.pageid, "detail");
-  });
-
-  refs.collectionList?.addEventListener("keydown", (event) => {
-    const card = event.target.closest(".article-card[data-pageid]");
-    if (!card) return;
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      showModal(card.dataset.pageid, "detail");
-    }
   });
 
   refs.folderList?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-folder-id]");
     if (!button) return;
-    uiState.collectionScope = "folders";
-    uiState.activeFolderId = button.dataset.folderId;
+    const folderId = button.dataset.folderId;
+    if (folderId === COLLECTION_ALL_FOLDER_ID) {
+      uiState.collectionScope = "all";
+    } else {
+      uiState.collectionScope = "folders";
+      uiState.activeFolderId = folderId;
+    }
     uiState.activeTab = "collection";
     renderAll();
   });
@@ -1055,9 +1044,9 @@ function showCollectionControlTutorial(index = 0) {
       target: document.querySelector(".folder-builder"),
     },
     {
-      title: "Favorites and folders",
-      body: "<p>Switch here to browse favorites or your custom folders.</p>",
-      target: refs.scopeButtons.find((button) => button.dataset.scope === "folders"),
+      title: "Folders and favorites",
+      body: "<p>Use <strong>All</strong> to see every collected article, or tap <strong>Favorites</strong> or a folder to filter the list.</p>",
+      target: refs.folderList,
     },
   ];
   const step = steps[index];
@@ -1079,8 +1068,8 @@ function showCollectionArticleTutorial() {
   const detailsButton = document.querySelector(`[data-pageid="${pageid}"] [data-action="toggle-expand"]`);
   uiState.tutorial.step = "show-details";
   showTutorial({
-    title: "Show details",
-      body: "<p>Show details opens the article summary, quality and popularity scores, category, folders, and link.</p>",
+    title: "Expand an article",
+    body: "<p>Tap the article row to see location, folders, Insight scores, and links.</p>",
     target: detailsButton,
     buttonText: "Next",
     onButton: () => {
@@ -1091,6 +1080,10 @@ function showCollectionArticleTutorial() {
 
 function showShowOnMapTutorial() {
   const pageid = getTutorialArticleId();
+  if (pageid) {
+    uiState.expandedCollectionIds.add(String(pageid));
+    renderCollectionView();
+  }
   const mapButton = document.querySelector(`[data-pageid="${pageid}"] [data-action="focus-map"]`);
   uiState.tutorial.step = "show-on-map";
   showTutorial({
@@ -1405,7 +1398,6 @@ function renderTabs() {
     refs.nearbyTabBadge.setAttribute("aria-label", `${nearbyCount} nearby articles`);
     refs.nearbyTabBadge.classList.toggle("is-hidden", uiState.activeTab !== "collection" || nearbyCount === 0);
   }
-  refs.scopeButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.scope === uiState.collectionScope));
   refs.titleScreen?.classList.toggle("is-hidden", uiState.activeTab !== "title");
   refs.appTabs?.classList.toggle("is-hidden", uiState.activeTab === "title");
   refs.exploreView.classList.toggle("is-hidden", uiState.activeTab !== "discover");
@@ -1508,19 +1500,29 @@ function renderCollectionView() {
   const sortedArticles = sortCollectionArticles(getUnlockedArticles());
   const filteredArticles = filterCollectionArticles(sortedArticles);
 
-  // folders render as pills above the list
-  refs.folderList.innerHTML = appState.folders.map((folder) => {
+  // folders render as pills above the list (first chip: all articles)
+  const allCount = getUnlockedArticles().length;
+  const allPillActive = uiState.collectionScope === "all";
+  const allPill = `
+      <button class="folder-pill ${allPillActive ? "is-active" : ""}" type="button" data-folder-id="${escapeHtml(COLLECTION_ALL_FOLDER_ID)}"${allPillActive ? ' aria-current="true"' : ""}>
+        <i class="bi bi-grid-3x3-gap" aria-hidden="true"></i>
+        <span>All</span>
+        <span class="folder-pill__count">${allCount}</span>
+      </button>
+    `;
+  const folderPills = appState.folders.map((folder) => {
     const count = getFolderArticleCount(folder.id);
     const iconClass = getFolderIcon(folder.iconKey).className;
     const active = uiState.collectionScope === "folders" && uiState.activeFolderId === folder.id;
     return `
-      <button class="folder-pill ${active ? "is-active" : ""}" type="button" data-folder-id="${escapeHtml(folder.id)}">
+      <button class="folder-pill ${active ? "is-active" : ""}" type="button" data-folder-id="${escapeHtml(folder.id)}"${active ? ' aria-current="true"' : ""}>
         <i class="bi ${escapeHtml(iconClass)}" aria-hidden="true"></i>
         <span>${escapeHtml(folder.name)}</span>
         <span class="folder-pill__count">${count}</span>
       </button>
     `;
   }).join("");
+  refs.folderList.innerHTML = allPill + folderPills;
 
   if (!sortedArticles.length) {
     refs.collectionList.innerHTML = '<p class="article-list__empty">Your collection is empty. Unlock nearby articles from Discover to start filling it in.</p>';
@@ -1538,15 +1540,24 @@ function renderCollectionView() {
     const devDeleteButton = uiState.devMode
       ? `<button class="ghost-button dev-delete-button" type="button" data-action="delete-article" data-pageid="${escapeHtml(article.pageid)}">Delete</button>`
       : "";
-    // folder tags show current assignments
-    const tags = article.folderIds.map((folderId) => appState.folders.find((folder) => folder.id === folderId)).filter(Boolean).map((folder) => `<span class="folder-tag"><i class="bi ${escapeHtml(getFolderIcon(folder.iconKey).className)}" aria-hidden="true"></i>${escapeHtml(folder.name)}</span>`).join("");
+    const assignedCustomFolders = article.folderIds
+      .map((folderId) => appState.folders.find((folder) => folder.id === folderId))
+      .filter((folder) => folder && !folder.system);
+    const folderIconsHtml = assignedCustomFolders.length
+      ? `<span class="collection-item__folder-icons" aria-label="In folders: ${escapeHtml(assignedCustomFolders.map((f) => f.name).join(", "))}">${assignedCustomFolders
+          .map(
+            (folder) =>
+              `<span class="collection-item__folder-icon" title="${escapeHtml(folder.name)}"><i class="bi ${escapeHtml(getFolderIcon(folder.iconKey).className)}" aria-hidden="true"></i></span>`
+          )
+          .join("")}</span>`
+      : "";
     // assignments only show when details expand
     const assignments = customFolders.length
       ? customFolders.map((folder) => {
           const checked = article.folderIds.includes(folder.id) ? "checked" : "";
           return `
-            <label class="folder-assignment">
-              <input type="checkbox" data-action="folder-toggle" data-folder-id="${escapeHtml(folder.id)}" data-pageid="${escapeHtml(article.pageid)}" ${checked} />
+            <label class="folder-assignment" data-action="folder-toggle" data-folder-id="${escapeHtml(folder.id)}" data-pageid="${escapeHtml(article.pageid)}">
+              <input type="checkbox" tabindex="-1" ${checked} />
               <i class="bi ${escapeHtml(getFolderIcon(folder.iconKey).className)}" aria-hidden="true"></i>
               <span>${escapeHtml(folder.name)}</span>
             </label>
@@ -1554,39 +1565,35 @@ function renderCollectionView() {
         }).join("")
       : '';
 
+    const titleClusterClass =
+      "collection-item__title-cluster" + (assignedCustomFolders.length ? " collection-item__title-cluster--has-folders" : "");
+
     return `
-      <!-- collection card -->
-      <article class="article-card article-card--collection" style="--card-accent: ${escapeHtml(article.categoryColor)}" data-pageid="${escapeHtml(article.pageid)}" tabindex="0" role="listitem">
-        <div class="article-card__media">${buildArticleMedia(article, false)}</div>
-        <div class="article-card__content">
-          <div class="collection-card__title-row">
-            <div>
-              <h2 class="article-card__title">${escapeHtml(article.title)}</h2>
-              <div class="article-card__eyebrow">Discovered ${escapeHtml(formatDate(article.discoveredAt))}</div>
-              <div class="article-card__eyebrow collection-card__location">
-                <i class="bi bi-geo-alt-fill" aria-hidden="true"></i>
-                <span>${escapeHtml(buildLocationLabel(article.location))}</span>
-              </div>
-            </div>
-            <button class="inline-icon-button ${article.isFavorite ? "is-active" : ""}" type="button" data-action="favorite-toggle" data-pageid="${escapeHtml(article.pageid)}" aria-label="Toggle favorite">
-              <i class="bi ${article.isFavorite ? "bi-heart-fill" : "bi-heart"}" aria-hidden="true"></i>
-            </button>
+      <article class="collection-item" data-pageid="${escapeHtml(article.pageid)}" role="listitem" style="--item-accent: ${escapeHtml(article.categoryColor)}">
+        <div class="collection-item__bar">
+          <button type="button" class="collection-item__toggle" data-action="toggle-expand" data-pageid="${escapeHtml(article.pageid)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="collection-expanded-${escapeHtml(article.pageid)}">
+            <span class="${titleClusterClass}"><span class="collection-item__title">${escapeHtml(article.title)}</span>${folderIconsHtml}</span>
+          </button>
+          <button class="collection-item__favorite inline-icon-button ${article.isFavorite ? "is-active" : ""}" type="button" data-action="favorite-toggle" data-pageid="${escapeHtml(article.pageid)}" aria-label="${article.isFavorite ? "Remove from favorites" : "Add to favorites"}">
+            <i class="bi ${article.isFavorite ? "bi-heart-fill" : "bi-heart"}" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="collection-item__expanded ${expanded ? "" : "is-hidden"}" id="collection-expanded-${escapeHtml(article.pageid)}" role="region"${expanded ? "" : " hidden"}>
+          <div class="collection-item__location">
+            <i class="bi bi-geo-alt-fill" aria-hidden="true"></i>
+            <span>${escapeHtml(buildLocationLabel(article.location))}</span>
           </div>
-          ${tags ? `<div class="card-meta-row">${tags}</div>` : ""}
-          <div class="card-action-row">
-            <button class="ghost-button" type="button" data-action="toggle-expand" data-pageid="${escapeHtml(article.pageid)}">${expanded ? "Hide details" : "Show details"}</button>
-            <button class="ghost-button" type="button" data-action="focus-map" data-pageid="${escapeHtml(article.pageid)}">Show on map</button>
+          <div class="collection-item__scores">
+            <span class="meta-chip meta-chip--category" style="--chip-color: ${escapeHtml(article.categoryColor)}">${escapeHtml(article.categoryLabel)}</span>
+            <span class="meta-chip">${escapeHtml(buildQualityLabel(article))}</span>
+            <span class="meta-chip">${escapeHtml(buildPopularityLabel(article))}</span>
+          </div>
+          <div class="collection-item__actions">
+            <button type="button" class="ghost-button" data-action="focus-map" data-pageid="${escapeHtml(article.pageid)}">Show on map</button>
+            <a class="ghost-button collection-item__article-link" href="${escapeHtml(article.url)}" target="_blank" rel="noopener noreferrer">View article</a>
             ${devDeleteButton}
           </div>
-          <div class="collection-card__expanded ${expanded ? "" : "is-hidden"}">
-            <div class="card-meta-row">
-              <span class="meta-chip meta-chip--category" style="--chip-color: ${escapeHtml(article.categoryColor)}">${escapeHtml(article.categoryLabel)}</span>
-              <span class="meta-chip">${escapeHtml(buildQualityLabel(article))}</span>
-              <span class="meta-chip">${escapeHtml(buildPopularityLabel(article))}</span>
-            </div>
-            <a class="ghost-button collection-card__article-link" href="${escapeHtml(article.url)}" target="_blank" rel="noopener noreferrer">Open article</a>
-            <div class="folder-assignment-list">${assignments}</div>
-          </div>
+          ${assignments ? `<div class="folder-assignment-list">${assignments}</div>` : ""}
         </div>
       </article>
     `;

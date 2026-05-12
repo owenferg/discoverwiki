@@ -113,46 +113,47 @@
           </div>
         </header>
 
-        <div class="collection-toolbar">
-          <div class="scope-row" role="tablist" aria-label="Collection views">
-            <button class="scope-button is-active" type="button" data-scope="all">All</button>
-            <button class="scope-button" type="button" data-scope="folders">Favorites & folders</button>
+        <details class="folder-builder" aria-labelledby="folder-builder-heading">
+          <summary class="folder-builder__summary">
+            <span class="folder-builder__summary-inner">
+              <h2 id="folder-builder-heading">Create folder</h2>
+              <p>Pick a name and icon for a new collection folder.</p>
+            </span>
+            <i class="bi bi-chevron-down folder-builder__chevron collection-chevron" aria-hidden="true"></i>
+          </summary>
+          <div class="folder-builder__body">
+            <div class="folder-builder__controls">
+              <input
+                id="folderNameInput"
+                class="folder-name-input"
+                type="text"
+                maxlength="28"
+                placeholder="Museum finds"
+                aria-label="Folder name"
+              />
+              <button id="createFolderButton" class="create-folder-button" type="button">Create</button>
+            </div>
+            <div id="folderIconPicker" class="folder-icon-picker" role="listbox" aria-label="Folder icon"></div>
           </div>
-        </div>
-
-        <section class="folder-builder" aria-label="Create a folder">
-          <div class="folder-builder__header">
-            <h2>Create folder</h2>
-            <p>Pick a name and icon for a new collection folder.</p>
-          </div>
-          <div class="folder-builder__controls">
-            <input
-              id="folderNameInput"
-              class="folder-name-input"
-              type="text"
-              maxlength="28"
-              placeholder="Museum finds"
-              aria-label="Folder name"
-            />
-            <button id="createFolderButton" class="create-folder-button" type="button">Create</button>
-          </div>
-          <div id="folderIconPicker" class="folder-icon-picker" role="listbox" aria-label="Folder icon"></div>
-        </section>
+        </details>
         <label class="sort-control">
           <span>Sort by</span>
-          <select id="collectionSort">
-            <option value="date-desc">Date discovered (recent)</option>
-            <option value="date-asc">Date discovered (old)</option>
-            <option value="quality-desc">Quality (high to low)</option>
-            <option value="quality-asc">Quality (low to high)</option>
-            <option value="popularity-desc">Popularity (high to low)</option>
-            <option value="popularity-asc">Popularity (low to high)</option>
-            <option value="category">Category</option>
-            <option value="city">Location: city</option>
-            <option value="region">Location: state/region</option>
-            <option value="country">Location: country</option>
-            <option value="continent">Location: continent</option>
-          </select>
+          <span class="sort-control__select-wrap">
+            <select id="collectionSort" class="sort-control__select">
+              <option value="date-desc">Date discovered (recent)</option>
+              <option value="date-asc">Date discovered (old)</option>
+              <option value="quality-desc">Quality (high to low)</option>
+              <option value="quality-asc">Quality (low to high)</option>
+              <option value="popularity-desc">Popularity (high to low)</option>
+              <option value="popularity-asc">Popularity (low to high)</option>
+              <option value="category">Category</option>
+              <option value="city">Location: city</option>
+              <option value="region">Location: state/region</option>
+              <option value="country">Location: country</option>
+              <option value="continent">Location: continent</option>
+            </select>
+            <i class="bi bi-chevron-down sort-control__chevron collection-chevron" aria-hidden="true"></i>
+          </span>
         </label>
 
         <div id="folderList" class="folder-list" aria-label="Collection folders"></div>
