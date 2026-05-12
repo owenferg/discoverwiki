@@ -1354,10 +1354,6 @@ button {
   left: 64px;
 }
 
-.is-dev-mode .fog-overlay {
-  display: none;
-}
-
 .map-search {
   position: absolute;
   z-index: 5;

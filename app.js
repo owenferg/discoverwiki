@@ -708,9 +708,9 @@ function positionToCenter(position) {
 
 // page status
 function setStatus(message, state = "loading") {
-  // refs.statusText.textContent = message;
-  // refs.statusText.className = `status-text ${state}`;
-  // refs.statusPill?.classList.toggle("is-hidden", uiState.activeTab === "discover" && state === "success" && !uiState.devMode);
+  refs.statusText.textContent = message;
+  refs.statusText.className = `status-text ${state}`;
+  refs.statusPill?.classList.toggle("is-hidden", uiState.activeTab === "discover" && state === "success" && !uiState.devMode);
 }
 
 function showLocationTroublePopup() {
@@ -775,7 +775,7 @@ function getSpotlightRect({ target = null }) {
       bottom: rect.bottom,
       width: rect.width,
       height: rect.height,
-      // radius: window.getComputedStyle(target).borderRadius || "18px",
+      radius: window.getComputedStyle(target).borderRadius || "18px",
     };
   }
   return null;
@@ -809,9 +809,8 @@ function setTutorialSpotlight(rect) {
     top: `${top}px`,
     width: `${width}px`,
     height: `${height}px`,
-    // borderRadius: rect.radius,
+    borderRadius: rect.radius,
   });
-  refs.tutorialHighlight.style.removeProperty("border-radius");
   refs.tutorialHighlight.classList.remove("is-hidden");
 }
 
@@ -934,7 +933,7 @@ function showPopularityInfo() {
     title: "What is Popularity?",
     body: `
       <p>Popularity is your combined WikiRank popularity footprint across collected articles.</p>
-      <p>The WikiRank API reports English popularity as a flat reference (100 for nearly every article), so discoverWiki instead sums WikiRank popularity from every <em>other</em> language edition linked for that topic — wider translation footprints score higher.</p>
+      <p>The WikiRank API reports English popularity as a flat reference (100 for nearly every article), so DiscoverWiki instead sums WikiRank popularity from every <em>other</em> language edition linked for that topic — wider translation footprints score higher.</p>
       <p><a href="https://wikirank.net/" target="_blank" rel="noopener noreferrer">Learn more on WikiRank</a></p>
     `,
     buttonText: "OK",
@@ -1936,7 +1935,7 @@ async function fetchWikiRankForArticle(pageid) {
     url.search = new URLSearchParams({ name: record.title, lang: WIKIRANK_QUERY_LANG }).toString();
     const response = await fetch(url.toString());
     if (response.status === 404) {
-      throw new Error("WikiRank proxy not found. Start discoverWiki with `python server.py`.");
+      throw new Error("WikiRank proxy not found. Start DiscoverWiki with `python server.py`.");
     }
     if (!response.ok) throw new Error(`WikiRank request failed with status ${response.status}`);
     const data = await response.json();

@@ -97,12 +97,12 @@ class DiscoverWikiHandler(SimpleHTTPRequestHandler):
 # server entry
 def main():
     server = ThreadingHTTPServer(("127.0.0.1", PORT), DiscoverWikiHandler)
-    print(f"discoverWiki server running at http://127.0.0.1:{PORT}")
+    print(f"DiscoverWiki server running at http://127.0.0.1:{PORT}")
     print("WikiRank quality requests are proxied through /api/wikirank")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nShutting down discoverWiki server...")
+        print("\nShutting down DiscoverWiki server...")
     finally:
         server.server_close()
 
