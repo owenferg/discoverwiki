@@ -1,6 +1,6 @@
 # discoverWiki
 
-This is a location-based Wikipedia discovery prototype with unlockable nearby articles, a persistent collection, and WikiRank-powered quality scores.
+This is a location-based Wikipedia discovery prototype with unlockable nearby articles, a persistent collection, and WikiRank-powered quality scores. Intended for mobile use.
 
 ## Run
 
