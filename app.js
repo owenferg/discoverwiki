@@ -2327,7 +2327,8 @@ async function loadArticlesForCenter(center, fallback, { recenter = true, instan
         if (instant) map.jumpTo(moveOptions);
         else map.flyTo(moveOptions);
       }
-      return setStatus(fallback ? "No nearby articles found in New York." : "No nearby articles found here.", "error");
+      // return setStatus(fallback ? "No nearby articles found in New York." : "No nearby articles found here.", "error");
+      return
     }
 
     const furthestMiles = articles[articles.length - 1].distanceMiles;
@@ -2336,7 +2337,7 @@ async function loadArticlesForCenter(center, fallback, { recenter = true, instan
       if (instant) map.jumpTo(moveOptions);
       else map.flyTo(moveOptions);
     }
-    setStatus(fallback ? "Showing New York while location is unavailable." : "Live location is on. Click a nearby article to unlock it.", "success");
+    // setStatus(fallback ? "Showing New York while location is unavailable." : "Live location is on. Click a nearby article to unlock it.", "success");
   } finally {
     uiState.isLoadingArticles = false;
   }
