@@ -1,12 +1,14 @@
+// mapbox gl token (swap for your own if you fork / ship broadly)
 mapboxgl.accessToken = "pk.eyJ1Ijoib3dlbmZlcmciLCJhIjoiY21uaHp6a3Z5MDg5NjJwb2RrdTVpbDhxbCJ9.i_URRCdviydaQxvfgjhVfw";
 
-// app config
+// app config - distances in miles unless noted
 const DISCOVER_RADIUS_MILES = 0.1;
 const FOG_TRAIL_RADIUS_MILES = DISCOVER_RADIUS_MILES;
 const FOG_TRAIL_DEDUPE_MILES = 0.055;
 const MAX_FOG_TRAIL_SAMPLES = 6000;
 const ARTICLE_REFRESH_DISTANCE_MILES = 0.08;
 const MAX_LOCKED_MARKERS = 20;
+// localstorage blob for unlocked articles, folders, fog trail samples
 const STORAGE_KEY = "discoverwiki-state-v1";
 const TUTORIAL_STORAGE_KEY = "discoverwiki-tutorial-complete-v1";
 const WIKIRANK_PROXY_PATH = "/api/wikirank";
@@ -19,6 +21,7 @@ const GEOLOCATION_FALLBACK_OPTIONS = { enableHighAccuracy: false, timeout: 25000
 const GEOLOCATION_WATCH_OPTIONS = { enableHighAccuracy: true, maximumAge: 30000 };
 const LOCATION_RETRY_INTERVAL_MS = 15000;
 const LOCATION_HELP_DELAY_MS = 15000;
+// nyc fallback when coords missing or offline demo paths
 const defaultCenter = [-74.006, 40.7128];
 
 // folder icons
@@ -32,7 +35,7 @@ const FOLDER_ICON_OPTIONS = [
   { key: "pin", className: "bi-pin-map-fill", label: "Pin" },
 ];
 
-/** `data-folder-id` value for the “All articles” chip (not a real folder). */
+// fake folder id for the "all articles" chip - never persisted as a folder
 const COLLECTION_ALL_FOLDER_ID = "__all__";
 
 // article categories
@@ -49,7 +52,7 @@ const CATEGORY_DEFINITIONS = [
   { key: "other", label: "Other", color: "#7B8794", keywords: [] },
 ];
 
-// dom refs
+// dom refs - grab once at load
 const refs = {
   appViewport: document.getElementById("appViewport"),
   appShell: document.getElementById("appShell"),
@@ -107,10 +110,12 @@ const refs = {
   tutorialButton: document.getElementById("tutorialButton"),
 };
 
-// app state
+// persisted collection + folders + fog samples
 const appState = loadState();
+// ephemeral ui + map + request bookkeeping (not persisted as a whole)
 const uiState = {
   activeTab: "title",
+  // collection tab: "all" vs filtered by folder chip
   collectionScope: "all",
   activeFolderId: "favorites",
   collectionSort: "date-desc",
@@ -134,6 +139,7 @@ const uiState = {
     unlockedPageId: null,
     waitingForArticles: false,
   },
+  // wikirank: dedupe in-flight, bounded parallelism via queue + pump
   wikiRankRequests: new Set(),
   wikiRankQueue: [],
   wikiRankQueueSet: new Set(),
@@ -141,7 +147,7 @@ const uiState = {
   locationRequests: new Set(),
 };
 
-// map setup
+// map setup - discover tab owns this instance
 const map = new mapboxgl.Map({
   container: "map",
   style: "mapbox://styles/mapbox/light-v11",
@@ -161,7 +167,7 @@ let locationHelpTimer = null;
 let mapIsReady = false;
 let mapLayersInitialized = false;
 
-// app startup
+// app startup - bind listeners then paint from state
 setupStaticUi();
 renderFolderIconPicker();
 renderAll();
@@ -181,6 +187,7 @@ map.on("click", handleDevMapClick);
 
 setupViewportResizeObserver();
 
+// desktop phone frame / split layout changes canvas size - map must resize
 function setupViewportResizeObserver() {
   const root = refs.appViewport;
   if (!root || typeof ResizeObserver === "undefined") return;
@@ -192,7 +199,7 @@ function setupViewportResizeObserver() {
   ro.observe(root);
 }
 
-// static events
+// one-off click/change listeners for chrome that survives rerenders
 function setupStaticUi() {
   refs.discoverButton?.addEventListener("click", enterDiscoverView);
   refs.viewCollectionButton?.addEventListener("click", () => {
@@ -276,7 +283,7 @@ function setupStaticUi() {
   });
 }
 
-// saved state
+// pull json from localstorage or seed empty shape
 function loadState() {
   const emptyState = { unlockedArticles: {}, folders: [], fogTrailSamples: [] };
   try {
@@ -336,9 +343,10 @@ function ensureSystemFolders(state) {
   };
 }
 
-// article state
+// article shape stored per unlocked pageid - normalize legacy saves / missing fields
 function normalizeUnlockedArticle(article) {
   const category = getCategoryDefinition(article?.categoryKey);
+  // old saves used flat en popularity=100; bump them through idle so we refetch intl sum
   const popularityMetricOk = article?.popularityMetric === WIKIRANK_POPULARITY_METRIC;
 
   let popularity =
@@ -397,10 +405,11 @@ function normalizeLocation(location) {
 }
 
 function persistState() {
+  // whole appState serializes - keep unlockedArticles lean-ish
   localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
 }
 
-// metadata helpers
+// category tagging - wp categories are noisy; we score curated keywords + skip maintenance ones
 function getCategoryDefinition(key) {
   return CATEGORY_DEFINITIONS.find((entry) => entry.key === key) || CATEGORY_DEFINITIONS[CATEGORY_DEFINITIONS.length - 1];
 }
@@ -449,6 +458,7 @@ function scoreCategoryDefinition(definition, categoryNames, fallbackText) {
 }
 
 function inferCategory(page) {
+  // keyword scoring against wp categories + title/extract fallback - cheap heuristic
   const categoryNames = getCleanCategoryNames(page);
   const fallbackText = `${page?.title || ""} ${page?.extract || ""}`.toLowerCase();
   let bestCategory = CATEGORY_DEFINITIONS[CATEGORY_DEFINITIONS.length - 1];
@@ -467,6 +477,7 @@ function inferCategory(page) {
 }
 
 // location helpers
+// wrap geolocation in promises so we can race timeouts (see withAppTimeout)
 function getCurrentPosition(options = {}) {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) return reject(new Error("Geolocation is not supported by this browser."));
@@ -579,6 +590,7 @@ async function retryLocationFetch() {
 }
 
 async function waitForInitialLocationOnTitle() {
+  // blocks enter discover/collection until coords exist - loops with delays on timeout
   while (uiState.activeTab === "title" && uiState.awaitingLocationFix) {
     try {
       // stay on title until a real position exists
@@ -593,7 +605,7 @@ async function waitForInitialLocationOnTitle() {
   return null;
 }
 
-// discover entry
+// title screen → discover with optional first-run tutorial chain
 async function enterDiscoverView() {
   if (!navigator.geolocation) {
     showTitleScreen("Discover needs location access, but this browser does not support geolocation.");
@@ -643,6 +655,7 @@ async function enterDiscoverView() {
 }
 
 async function enterCollectionViewFromTitle() {
+  // still asks location so nearby badge / distance logic stays honest
   if (!navigator.geolocation) {
     showTitleScreen("Collection needs location access, but this browser does not support geolocation.");
     return;
@@ -695,7 +708,7 @@ function positionToCenter(position) {
   return [position.coords.longitude, position.coords.latitude];
 }
 
-// page status
+// tiny toast-style line above discover map (hidden on collection/title)
 function setStatus(message, state = "loading") {
   refs.statusText.textContent = message;
   refs.statusText.className = `status-text ${state}`;
@@ -717,7 +730,7 @@ function showLocationTroublePopup() {
   });
 }
 
-// tutorial flow
+// tutorial flow - spotlight overlay + stepped callbacks (discover → collection → done)
 let tutorialButtonAction = null;
 
 function hasCompletedTutorial() {
@@ -744,6 +757,7 @@ function hideTutorial() {
 }
 
 function clampTutorialPosition(left, top) {
+  // keep card on-screen when target hugs an edge
   const card = refs.tutorialCard;
   const margin = 12;
   const width = card?.offsetWidth || Math.min(320, window.innerWidth - margin * 2);
@@ -832,6 +846,7 @@ function scrollTutorialTargetIntoView(target) {
 }
 
 function showTutorial({ title, body, buttonText = "Next", target = null, coordinates = null, placement = "auto", onButton = null }) {
+  // coordinates mode projects lnglat → pixels for map-driven steps
   refs.tutorialTitle.textContent = title;
   refs.tutorialBody.innerHTML = body;
   if (buttonText === null) {
@@ -855,6 +870,7 @@ function showTutorial({ title, body, buttonText = "Next", target = null, coordin
   });
 }
 
+// first-run coach marks - spotlight dom nodes or map coords
 function startTutorial() {
   uiState.tutorial.active = true;
   uiState.tutorial.step = "welcome";
@@ -904,6 +920,7 @@ function isTutorialUnlockException(article) {
 }
 
 function canUnlockArticle(article) {
+  // tutorial grants one cheat unlock slightly outside radius so flow never dead-ends
   return article.distanceMiles <= DISCOVER_RADIUS_MILES || isTutorialUnlockException(article);
 }
 
@@ -922,7 +939,7 @@ function showPopularityInfo() {
     title: "What is Popularity?",
     body: `
       <p>Popularity is your combined WikiRank popularity footprint across collected articles.</p>
-      <p>The WikiRank API reports English popularity as a flat reference (100 for nearly every article), so DiscoverWiki instead sums WikiRank popularity from every <em>other</em> language edition linked for that topic — wider translation footprints score higher.</p>
+      <p>The WikiRank API reports English popularity as a flat reference (100 for nearly every article), so DiscoverWiki instead sums WikiRank popularity from every <em>other</em> language edition linked for that topic - wider translation footprints score higher.</p>
       <p><a href="https://wikirank.net/" target="_blank" rel="noopener noreferrer">Learn more on WikiRank</a></p>
     `,
     buttonText: "OK",
@@ -1102,7 +1119,7 @@ function finishTutorial() {
   hideTutorial();
 }
 
-// dev mode
+// dev mode - fake location from map, optional fog trail capture to storage
 function stopLocationTracking() {
   clearLocationRetry();
   clearLocationHelpTimer();
@@ -1143,6 +1160,7 @@ function getDistanceMiles(start, end) {
   return 2 * earthRadiusMiles * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// string helpers for templates + map popup html
 function escapeHtml(value) {
   return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
@@ -1171,7 +1189,7 @@ function cleanCountryName(value) {
   return String(value || "").replace(/\s*\(the\)$/i, "").replace(/\s*\(.*?\)$/g, "").trim();
 }
 
-// display helpers
+// human-readable location line for chips - relies on reverse geocode cache
 function buildLocationLabel(location) {
   if (!location) return "Location loading...";
   return [location.city, location.region, location.country].filter(Boolean).join(", ") || location.continent || "Location unavailable";
@@ -1195,6 +1213,7 @@ function getUnlockedRecord(pageid) {
 }
 
 function decorateArticleWithState(article) {
+  // merge saved unlock fields onto geosearch rows - keeps list + markers in sync
   const unlocked = getUnlockedRecord(article.pageid);
   return unlocked ? { ...article, ...unlocked, distanceMiles: article.distanceMiles, unlocked: true } : { ...article, unlocked: false, lockedTitle: maskTitle(article.title) };
 }
@@ -1204,6 +1223,7 @@ function updateNearbyArticlesFromState() {
 }
 
 async function refreshMissingCategoriesForUnlockedArticles() {
+  // background upgrade for old saves stuck on "other" after we improved inferCategory
   const articles = getUnlockedArticles().filter((article) => article.categoryKey === "other");
   if (!articles.length) return;
 
@@ -1235,6 +1255,7 @@ async function refreshMissingCategoriesForUnlockedArticles() {
 
 // wiki api
 async function fetchWikipediaCategories(pageIds) {
+  // batched clcontinue paging - wp caps categories per response
   if (!pageIds.length) return new Map();
   const categoriesByPage = new Map(pageIds.map((pageId) => [String(pageId), []]));
   const seenByPage = new Map(pageIds.map((pageId) => [String(pageId), new Set()]));
@@ -1282,7 +1303,7 @@ async function fetchWikipediaCategories(pageIds) {
 }
 
 async function fetchWikipediaArticles(center) {
-  // geosearch finds nearby page ids
+  // two-hop: geosearch ids → query extracts/thumbs/categories in one detail call
   const searchUrl = new URL("https://en.wikipedia.org/w/api.php");
   searchUrl.search = new URLSearchParams({ action: "query", list: "geosearch", gscoord: `${center[1]}|${center[0]}`, gsradius: "10000", gslimit: "40", format: "json", origin: "*" }).toString();
   const searchResponse = await fetch(searchUrl.toString());
@@ -1329,7 +1350,7 @@ async function fetchWikipediaArticles(center) {
   }).filter((article) => Number.isFinite(article.coordinates[0]) && Number.isFinite(article.coordinates[1]));
 }
 
-// main render
+// single redraw hook - tabs, lists, modal, map layers
 function renderAll() {
   renderTabs();
   renderHeaderStats();
@@ -1369,6 +1390,7 @@ function showTitleScreen(message = "") {
   if (message) showTitleNotice(message);
 }
 
+// title ↔ discover/collection - handles hidden shell + map resize quirks
 function showAppView(view) {
   clearTitleNotice();
   uiState.activeTab = view === "collection" ? "collection" : "discover";
@@ -1385,6 +1407,7 @@ function showAppView(view) {
 }
 
 function renderTabs() {
+  // toggles main panels + disables collection tab until user has ≥1 unlock
   const hasCollection = getUnlockedArticles().length > 0;
   const nearbyCount = uiState.nearbyArticles.filter((article) => !article.unlocked && canUnlockArticle(article)).length;
   refs.tabButtons.forEach((button) => {
@@ -1446,6 +1469,7 @@ function buildQualityLabel(article) {
 }
 
 function renderExploreArticles() {
+  // sorted nearest-first - locked titles stay masked until in radius (unless tutorial cheat)
   if (!refs.articleList) return;
   if (!uiState.nearbyArticles.length) {
     refs.articleList.innerHTML = '<p class="article-list__empty">No nearby articles found yet. Try refreshing your location or moving to a different area.</p>';
@@ -1491,7 +1515,7 @@ function renderExploreArticles() {
   requestMissingMetadataForArticles(uiState.nearbyArticles.filter((article) => article.unlocked));
 }
 
-// collection render
+// collection tab - folder chips + sort select + virtualized-ish rows (innerHTML each render)
 function renderCollectionView() {
   if (!refs.collectionList || !refs.folderList) return;
   refs.collectionSort.value = uiState.collectionSort;
@@ -1608,6 +1632,7 @@ function getFolderIcon(iconKey) {
 
 // folder ui
 function renderFolderIconPicker() {
+  // re-binds icon buttons every render - cheap small grid
   if (!refs.folderIconPicker) return;
   refs.folderIconPicker.innerHTML = FOLDER_ICON_OPTIONS.map((option) => `
     <button class="folder-icon-button ${option.key === uiState.selectedFolderIcon ? "is-selected" : ""}" type="button" data-folder-icon="${escapeHtml(option.key)}" aria-label="${escapeHtml(option.label)}">
@@ -1685,6 +1710,7 @@ function compareText(left, right) {
 }
 
 function filterCollectionArticles(articles) {
+  // "all" chip skips filter; folder chips slice by favorites membership or folder ids
   if (uiState.collectionScope !== "folders") return articles;
   if ((uiState.activeFolderId || "favorites") === "favorites") return articles.filter((article) => article.isFavorite);
   return articles.filter((article) => article.folderIds.includes(uiState.activeFolderId));
@@ -1694,7 +1720,7 @@ function getArticleForDisplay(pageid) {
   return getUnlockedRecord(pageid) || uiState.nearbyArticles.find((article) => article.pageid === String(pageid)) || null;
 }
 
-// article actions
+// discover list buttons - unlock vs modal vs pan map
 function handleExploreAction(action, pageid) {
   if (!pageid) return;
   if (action === "unlock") return handleExploreCardActivate(pageid);
@@ -1722,6 +1748,7 @@ function handleExploreCardActivate(pageid) {
 }
 
 function handleCollectionAction(action, pageid, folderId) {
+  // delegated clicks from collection list - expand/favorite/map/folder pills/dev delete
   const article = getUnlockedRecord(pageid);
   if (!article && action !== "delete-article") return;
 
@@ -1761,7 +1788,7 @@ function handleCollectionAction(action, pageid, folderId) {
   }
 }
 
-// modal
+// modal sheet - reuse for unlock splash vs silent detail (summary visibility differs)
 function showModal(pageid, mode = "detail") {
   const article = getUnlockedRecord(pageid);
   if (!article) return;
@@ -1771,6 +1798,7 @@ function showModal(pageid, mode = "detail") {
 }
 
 function closeModal() {
+  // if user closed unlock celebration mid-tutorial, resume map chrome steps
   const closedPageId = uiState.modalPageId;
   const closedMode = uiState.modalMode;
   const shouldContinueTutorial = uiState.tutorial.active && (
@@ -1836,7 +1864,7 @@ function renderModal() {
   }
 }
 
-// unlock flow
+// turning a "nearby card" into saved state + celebration modal
 async function unlockArticle(article) {
   if (getUnlockedRecord(article.pageid)) return showModal(article.pageid, "detail");
 
@@ -1873,7 +1901,7 @@ async function unlockArticle(article) {
   requestMissingMetadataForArticles([record]);
 }
 
-// article metadata
+// sum non-en edition popularity - en alone is basically always 100 in wikirank data
 function wikiRankInternationalPopularitySum(result, queryLang) {
   let sum = 0;
   for (const [code, entry] of Object.entries(result)) {
@@ -1885,6 +1913,7 @@ function wikiRankInternationalPopularitySum(result, queryLang) {
 }
 
 function enqueueWikiRankFetch(pageid) {
+  // dedupe + fifo queue - pumpWikiRankQueue caps parallel fetches
   const id = String(pageid);
   if (uiState.wikiRankRequests.has(id)) return;
 
@@ -1901,6 +1930,7 @@ function enqueueWikiRankFetch(pageid) {
 }
 
 function pumpWikiRankQueue() {
+  // drain fifo while under parallel cap - finally blocks recurse pump
   while (uiState.wikiRankInflight < WIKIRANK_PARALLEL && uiState.wikiRankQueue.length) {
     const id = uiState.wikiRankQueue.shift();
     uiState.wikiRankQueueSet.delete(id);
@@ -1915,6 +1945,7 @@ function pumpWikiRankQueue() {
 }
 
 function requestMissingMetadataForArticles(articles) {
+  // fire-and-forget reverse geo + wikirank queue per unlocked row
   articles.forEach((article) => {
     const record = getUnlockedRecord(article.pageid);
     if (!record) return;
@@ -1924,6 +1955,7 @@ function requestMissingMetadataForArticles(articles) {
 }
 
 async function fetchWikiRankForArticle(pageid) {
+  // hits local server.py proxy → forwards to wikirank with article title
   const record = getUnlockedRecord(pageid);
   if (!record || uiState.wikiRankRequests.has(pageid)) return;
 
@@ -1982,6 +2014,7 @@ async function fetchWikiRankForArticle(pageid) {
 }
 
 async function fetchLocationForArticle(pageid) {
+  // optional reverse geocode - fills collection location chips when missing
   const record = getUnlockedRecord(pageid);
   if (!record || record.location || uiState.locationRequests.has(pageid)) return;
 
@@ -2033,6 +2066,7 @@ function shouldLoadArticlesForCenter(center, forceRefresh) {
 }
 
 async function handleLocationUpdate(position) {
+  // steady gps stream - first fix unlocks ui, later fixes mostly update distances
   if (uiState.devMode) return;
   console.info("watchPosition returned a location.", {
     latitude: position.coords.latitude,
@@ -2051,6 +2085,7 @@ async function handleLocationUpdate(position) {
 }
 
 async function applyLocationPosition(position, { forceRefresh = false, recenter = false } = {}) {
+  // shared path for watchPosition, manual refresh, dev fake coords
   const center = positionToCenter(position);
   const isInitialLocation = !uiState.hasLiveLocation;
   // first location uses jump instead of fly
@@ -2078,6 +2113,7 @@ async function applyLocationPosition(position, { forceRefresh = false, recenter 
 }
 
 function handleLocationError(error) {
+  // code 1 → bail to title; timeouts retry softly without nuking last good center
   if (error?.code === 1) {
     // permission denial returns home
     console.error(error);
@@ -2111,6 +2147,7 @@ function handleLocationError(error) {
 }
 
 async function locateAndLoadArticles(options = {}) {
+  // toolbar refresh - reruns geolocation pipeline then applyLocationPosition
   if (uiState.devMode) return useMapCenterAsLocation();
   let position;
   try {
@@ -2195,6 +2232,7 @@ async function handleMapSearch(event) {
 
 // nearby articles
 async function loadArticlesForCenter(center, fallback, { recenter = true, instant = false } = {}) {
+  // fallback=true → empty wiki results show ny demo copy (legacy friendly message)
   if (uiState.isLoadingArticles) return;
   // guard against overlapping wiki requests
   uiState.isLoadingArticles = true;
@@ -2232,6 +2270,7 @@ async function loadArticlesForCenter(center, fallback, { recenter = true, instan
 
 // map focus
 function focusArticleOnMap(article, locked = false) {
+  // pan/zoom only - details live in modal / discover cards now
   if (!article?.coordinates) return;
   map.flyTo({ center: article.coordinates, zoom: 16.2, essential: true });
   // deprecated mobile flow no longer uses map popups
@@ -2268,7 +2307,7 @@ function openArticlePopup(article, options = {}) {
 }
 
 function articlesToGeoJSON(articles, mode) {
-  // mapbox layers read simple feature props
+  // locked vs unlocked drives marker colors + "unlockable" halo styling
   return {
     type: "FeatureCollection",
     features: articles.map((article) => ({
@@ -2291,6 +2330,7 @@ function getArticleFeaturesAtPoint(point) {
 }
 
 async function handleDevMapClick(event) {
+  // empty map clicks reposition "gps" - handy when markers crowd the pin
   if (!uiState.devMode || uiState.activeTab !== "discover") return;
   if (getArticleFeaturesAtPoint(event.point).length) return;
 
@@ -2307,6 +2347,7 @@ async function handleDevMapClick(event) {
 
 // map layers
 function ensureMapLayers() {
+  // runs once on map load - circles + ? labels + click handlers
   if (!mapIsReady || mapLayersInitialized) return;
 
   // sources are updated after each render
@@ -2415,11 +2456,13 @@ function handleUnlockedLayerHover(event) {
 }
 
 function handleLockedLayerClick(event) {
+  // locked pins reuse same unlock gate as discover list cards
   const pageid = event.features?.[0]?.properties?.pageid;
   if (pageid) handleExploreCardActivate(pageid);
 }
 
 function renderMapData() {
+  // pushes geojson into named sources - capped locked pins for perf
   if (!mapIsReady || !map.getSource("unlocked-articles") || !map.getSource("locked-articles")) return;
   const unlockedArticles = getUnlockedArticles();
   // only nearest locked articles show
@@ -2450,6 +2493,7 @@ function pointIsNearViewport(point, width, height, padding) {
 }
 
 function recordFogTrailSample(center) {
+  // append-only path samples - dedupe nearby points, trim max length, optional dev-only disable
   if (uiState.devMode && !uiState.devFogTrailRecording) return;
   const lng = center[0];
   const lat = center[1];
@@ -2473,7 +2517,7 @@ function recordFogTrailSample(center) {
   if (mapIsReady) renderFogOverlay();
 }
 
-// fog overlay
+// svg fog mask above map - holes follow projected lnglat each pan/zoom frame
 function renderFogOverlay() {
   if (!mapIsReady || !refs.fogOverlay) return;
   const width = map.getContainer().clientWidth;
