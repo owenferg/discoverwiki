@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>DiscoverWiki</title>
+    <title>discoverWiki</title>
     <link rel="preconnect" href="https://api.mapbox.com" />
     <link rel="preconnect" href="https://upload.wikimedia.org" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -18,15 +18,15 @@
   </head>
   <body>
     <aside class="desktop-intro" aria-labelledby="desktopIntroHeading">
-      <h1 id="desktopIntroHeading" class="desktop-intro__title">DiscoverWiki</h1>
+      <h1 id="desktopIntroHeading" class="desktop-intro__title">discoverWiki</h1>
       <p class="desktop-intro__lede">
-        DiscoverWiki is not intended for desktop use. For the best experience, please open this site on a mobile device.
+        discoverWiki is not intended for desktop use. For the best experience, please open this site on a mobile device.
       </p>
     </aside>
-    <div id="appViewport" class="app-viewport" aria-label="DiscoverWiki app">
+    <div id="appViewport" class="app-viewport" aria-label="discoverWiki app">
       <main id="appShell" class="app-shell app-shell--title">
       <!-- title screen -->
-      <section id="titleScreen" class="title-screen" aria-label="DiscoverWiki home">
+      <section id="titleScreen" class="title-screen" aria-label="discoverWiki home">
         <div class="title-screen__content">
           <!-- <p class="title-screen__kicker">A walking game for Wikipedia</p> -->
           <h1>discoverWiki</h1>
@@ -117,7 +117,7 @@
           <summary class="folder-builder__summary">
             <span class="folder-builder__summary-inner">
               <h2 id="folder-builder-heading">Create folder</h2>
-              <p>Pick a name and icon for a new collection folder.</p>
+              <!-- <p>Pick a name and icon for a new collection folder.</p> -->
             </span>
             <i class="bi bi-chevron-down folder-builder__chevron collection-chevron" aria-hidden="true"></i>
           </summary>
@@ -187,6 +187,20 @@
         <a id="modalLink" class="modal-link" href="#" target="_blank" rel="noopener noreferrer">
           Read full article
         </a>
+      </section>
+    </div>
+
+    <!-- remove custom folder confirm -->
+    <div id="folderDeleteModal" class="modal-shell folder-delete-modal is-hidden" aria-hidden="true" hidden>
+      <div class="modal-backdrop" data-close-folder-delete="true"></div>
+      <section class="folder-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="folderDeleteHeading">
+        <h2 id="folderDeleteHeading" class="folder-delete-dialog__title"></h2>
+        <p class="folder-delete-dialog__body">You will keep the articles that are in the folder.</p>
+        <p class="folder-delete-dialog__note">This action cannot be undone.</p>
+        <div class="folder-delete-dialog__actions">
+          <button id="folderDeleteYes" class="ghost-button folder-delete-dialog__yes" type="button">Yes</button>
+          <button id="folderDeleteNo" class="primary-button folder-delete-dialog__no" type="button">No</button>
+        </div>
       </section>
     </div>
 

@@ -99,6 +99,10 @@ const refs = {
   modalSummary: document.getElementById("modalSummary"),
   modalLink: document.getElementById("modalLink"),
   modalCloseButton: document.getElementById("modalCloseButton"),
+  folderDeleteModal: document.getElementById("folderDeleteModal"),
+  folderDeleteHeading: document.getElementById("folderDeleteHeading"),
+  folderDeleteYes: document.getElementById("folderDeleteYes"),
+  folderDeleteNo: document.getElementById("folderDeleteNo"),
   fogOverlay: document.getElementById("fogOverlay"),
   tutorialOverlay: document.getElementById("tutorialOverlay"),
   tutorialBackdrop: document.getElementById("tutorialBackdrop"),
@@ -145,6 +149,7 @@ const uiState = {
   wikiRankQueueSet: new Set(),
   wikiRankInflight: 0,
   locationRequests: new Set(),
+  folderDeleteFolderId: null,
 };
 
 // map setup - discover tab owns this instance
@@ -259,9 +264,16 @@ function setupStaticUi() {
   });
 
   refs.folderList?.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-folder-id]");
-    if (!button) return;
-    const folderId = button.dataset.folderId;
+    const deleteOpener = event.target.closest('[data-action="folder-delete-open"]');
+    if (deleteOpener) {
+      event.preventDefault();
+      event.stopPropagation();
+      openFolderDeleteConfirm(deleteOpener.dataset.folderId, deleteOpener.dataset.folderName || "");
+      return;
+    }
+    const pill = event.target.closest("button.folder-pill[data-folder-id]");
+    if (!pill?.dataset.folderId) return;
+    const folderId = pill.dataset.folderId;
     if (folderId === COLLECTION_ALL_FOLDER_ID) {
       uiState.collectionScope = "all";
     } else {
@@ -272,6 +284,12 @@ function setupStaticUi() {
     renderAll();
   });
 
+  refs.folderDeleteYes?.addEventListener("click", confirmFolderDelete);
+  refs.folderDeleteNo?.addEventListener("click", closeFolderDeleteConfirm);
+  refs.folderDeleteModal?.addEventListener("click", (event) => {
+    if (event.target.dataset.closeFolderDelete === "true") closeFolderDeleteConfirm();
+  });
+
   refs.modalCloseButton?.addEventListener("click", closeModal);
   refs.modalShell?.addEventListener("click", (event) => {
     if (event.target.dataset.closeModal === "true") closeModal();
@@ -279,7 +297,12 @@ function setupStaticUi() {
   refs.tutorialButton?.addEventListener("click", handleTutorialButtonClick);
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && uiState.modalPageId) closeModal();
+    if (event.key !== "Escape") return;
+    if (refs.folderDeleteModal && !refs.folderDeleteModal.classList.contains("is-hidden")) {
+      closeFolderDeleteConfirm();
+      return;
+    }
+    if (uiState.modalPageId) closeModal();
   });
 }
 
@@ -939,7 +962,7 @@ function showPopularityInfo() {
     title: "What is Popularity?",
     body: `
       <p>Popularity is your combined WikiRank popularity footprint across collected articles.</p>
-      <p>The WikiRank API reports English popularity as a flat reference (100 for nearly every article), so DiscoverWiki instead sums WikiRank popularity from every <em>other</em> language edition linked for that topic - wider translation footprints score higher.</p>
+      <p>The WikiRank API reports English popularity as a flat reference (100 for nearly every article), so discoverWiki instead sums WikiRank popularity from every <em>other</em> language edition linked for that topic - wider translation footprints score higher.</p>
       <p><a href="https://wikirank.net/" target="_blank" rel="noopener noreferrer">Learn more on WikiRank</a></p>
     `,
     buttonText: "OK",
@@ -1538,13 +1561,30 @@ function renderCollectionView() {
     const count = getFolderArticleCount(folder.id);
     const iconClass = getFolderIcon(folder.iconKey).className;
     const active = uiState.collectionScope === "folders" && uiState.activeFolderId === folder.id;
+    const showTrash = active && !folder.system;
+    const fid = escapeHtml(folder.id);
+    const fname = escapeHtml(folder.name);
+
+    if (showTrash) {
+      return `
+      <span class="folder-pill-compound ${active ? "is-active" : ""}" role="group" aria-label="${fname}">
+        <button type="button" class="folder-pill folder-pill-compound__main" data-folder-id="${fid}"${active ? ' aria-current="true"' : ""}>
+          <i class="bi ${escapeHtml(iconClass)}" aria-hidden="true"></i>
+          <span>${fname}</span>
+          <span class="folder-pill__count">${count}</span>
+        </button>
+        <button type="button" class="folder-pill-compound__delete" data-action="folder-delete-open" data-folder-id="${fid}" data-folder-name="${fname}" aria-label="Remove folder ${fname}">
+          <i class="bi bi-trash" aria-hidden="true"></i>
+        </button>
+      </span>`;
+    }
+
     return `
-      <button class="folder-pill ${active ? "is-active" : ""}" type="button" data-folder-id="${escapeHtml(folder.id)}"${active ? ' aria-current="true"' : ""}>
+      <button class="folder-pill ${active ? "is-active" : ""}" type="button" data-folder-id="${fid}"${active ? ' aria-current="true"' : ""}>
         <i class="bi ${escapeHtml(iconClass)}" aria-hidden="true"></i>
-        <span>${escapeHtml(folder.name)}</span>
+        <span>${fname}</span>
         <span class="folder-pill__count">${count}</span>
-      </button>
-    `;
+      </button>`;
   }).join("");
   refs.folderList.innerHTML = allPill + folderPills;
 
@@ -1661,6 +1701,40 @@ function createFolderFromInput() {
   uiState.activeTab = "collection";
   refs.folderNameInput.value = "";
   setStatus(`Created folder ${name}.`, "success");
+  renderAll();
+}
+
+function openFolderDeleteConfirm(folderId, folderName) {
+  const folder = appState.folders.find((f) => f.id === String(folderId));
+  if (!folder || folder.system) return;
+  uiState.folderDeleteFolderId = String(folderId);
+  if (refs.folderDeleteHeading) refs.folderDeleteHeading.textContent = `Remove ${folderName || folder.name}?`;
+  refs.folderDeleteModal?.classList.remove("is-hidden");
+  if (refs.folderDeleteModal) refs.folderDeleteModal.hidden = false;
+  refs.folderDeleteModal?.setAttribute("aria-hidden", "false");
+}
+
+function closeFolderDeleteConfirm() {
+  uiState.folderDeleteFolderId = null;
+  refs.folderDeleteModal?.classList.add("is-hidden");
+  if (refs.folderDeleteModal) refs.folderDeleteModal.hidden = true;
+  refs.folderDeleteModal?.setAttribute("aria-hidden", "true");
+}
+
+function confirmFolderDelete() {
+  const folderId = uiState.folderDeleteFolderId;
+  if (!folderId) return closeFolderDeleteConfirm();
+  const folder = appState.folders.find((f) => f.id === folderId);
+  if (!folder || folder.system) return closeFolderDeleteConfirm();
+
+  appState.folders = appState.folders.filter((f) => f.id !== folderId);
+  Object.values(appState.unlockedArticles).forEach((article) => {
+    article.folderIds = article.folderIds.filter((id) => id !== folderId);
+  });
+  persistState();
+  uiState.collectionScope = "all";
+  closeFolderDeleteConfirm();
+  setStatus(`Removed folder "${folder.name}". Your articles stay in the collection.`, "success");
   renderAll();
 }
 
@@ -1974,7 +2048,7 @@ async function fetchWikiRankForArticle(pageid) {
     url.search = new URLSearchParams({ name: record.title, lang: WIKIRANK_QUERY_LANG }).toString();
     const response = await fetch(url.toString());
     if (response.status === 404) {
-      throw new Error("WikiRank proxy not found. Start DiscoverWiki with `python server.py`.");
+      throw new Error("WikiRank proxy not found. Start discoverWiki with `python server.py`.");
     }
     if (!response.ok) throw new Error(`WikiRank request failed with status ${response.status}`);
     const data = await response.json();
@@ -2108,8 +2182,8 @@ async function applyLocationPosition(position, { forceRefresh = false, recenter 
     return;
   }
 
-  if (recenter && !isInitialLocation) map.flyTo({ center, zoom: 15.8, essential: true });
-  setStatus("Location updated. Keep moving to discover more articles.", "success");
+  // if (recenter && !isInitialLocation) map.flyTo({ center, zoom: 15.8, essential: true });
+  // setStatus("Location updated. Keep moving to discover more articles.", "success");
 }
 
 function handleLocationError(error) {
@@ -2411,17 +2485,6 @@ function ensureMapLayers() {
       "circle-stroke-width": 1.7,
       "circle-opacity": 0.97,
     },
-  });
-
-  ["locked-articles-circle", "locked-articles-label", "unlocked-articles-circle"].forEach((layerId) => {
-    map.on("mouseenter", layerId, () => {
-      map.getCanvas().style.cursor = "pointer";
-    });
-    map.on("mouseleave", layerId, () => {
-      map.getCanvas().style.cursor = "";
-      // deprecated mobile flow no longer uses map popups
-      // articlePopup.remove();
-    });
   });
 
   // deprecated mobile flow no longer uses hover map popups

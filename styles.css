@@ -173,19 +173,6 @@ button {
   box-shadow: 0 10px 22px rgba(241, 102, 34, 0.22);
 }
 
-.utility-button:hover,
-.floating-button:hover,
-.create-folder-button:hover,
-.primary-button:hover,
-.ghost-button:hover,
-.inline-icon-button:hover,
-.scope-button:hover,
-.tab-button:hover,
-.folder-icon-button:hover,
-.folder-pill:hover {
-  transform: translateY(-1px);
-}
-
 .utility-button {
   display: inline-flex;
   align-items: center;
@@ -715,6 +702,64 @@ button {
   font-size: 0.72rem;
 }
 
+.folder-pill-compound {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid rgba(107, 78, 52, 0.1);
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--muted);
+}
+
+.folder-pill-compound.is-active {
+  border-color: rgba(241, 102, 34, 0.26);
+  background: linear-gradient(180deg, rgba(255, 143, 61, 0.16), rgba(255, 143, 61, 0.06));
+  color: #6a360d;
+}
+
+.folder-pill-compound .folder-pill {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.folder-pill-compound.is-active .folder-pill {
+  color: inherit;
+}
+
+.folder-pill-compound__main {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 9px 8px 9px 13px;
+  font-size: 0.84rem;
+}
+
+.folder-pill-compound__main > span:not(.folder-pill__count) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-pill-compound__delete {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  margin: 0;
+  padding: 0 10px 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(109, 92, 74, 0.72);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
 .folder-assignment-list {
   display: flex;
   gap: 8px;
@@ -863,6 +908,64 @@ button {
 
 .modal-shell.is-hidden {
   display: none;
+}
+
+.folder-delete-modal {
+  z-index: 11;
+}
+
+.folder-delete-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(420px, calc(100cqw - 28px));
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 22px 22px 20px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, #fffaf4, #fff5eb);
+  box-shadow: var(--shadow);
+  border: 1px solid rgba(107, 78, 52, 0.12);
+}
+
+.folder-delete-dialog__title {
+  margin: 0 0 14px;
+  font-family: var(--display);
+  font-size: clamp(1.25rem, 4.2vw, 1.55rem);
+  line-height: 1.2;
+  color: #5c3715;
+}
+
+.folder-delete-dialog__body,
+.folder-delete-dialog__note {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.folder-delete-dialog__note {
+  margin-top: 10px;
+  font-weight: 600;
+  color: rgba(61, 42, 28, 0.88);
+}
+
+.folder-delete-dialog__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.folder-delete-dialog__yes {
+  width: 100%;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.folder-delete-dialog__no {
+  width: 100%;
+  justify-content: center;
+  box-sizing: border-box;
 }
 
 .modal-backdrop {
@@ -1137,6 +1240,7 @@ button {
   .meta-chip,
   .folder-tag,
   .folder-pill,
+  .folder-pill-compound,
   .folder-assignment {
     flex: 0 0 auto;
     white-space: nowrap;
@@ -1157,6 +1261,16 @@ button {
   .inline-icon-button {
     width: 44px;
     height: 44px;
+  }
+
+  .folder-delete-dialog__yes,
+  .folder-delete-dialog__no {
+    min-height: 44px;
+  }
+
+  .folder-pill-compound__delete {
+    width: 38px;
+    min-height: 100%;
   }
 
   .collection-toolbar {
@@ -1630,11 +1744,6 @@ button {
   color: var(--accent-deep);
 }
 
-.collection-item__favorite:hover {
-  transform: none;
-  box-shadow: none;
-}
-
 .collection-item__favorite.is-active {
   background: transparent;
   border: none;
@@ -1946,7 +2055,7 @@ button {
 
   .app-viewport {
     flex: none;
-    width: min(390px, calc(100vw - 40px));
+    width: min(392px, calc(100vw - 40px));
     height: min(852px, calc(100dvh - 56px));
     overflow: hidden;
     border: 12px solid #1f232e;
@@ -1997,21 +2106,6 @@ button {
 .map-icon-button,
 .map-search__button {
   transition: none !important;
-}
-
-.utility-button:hover,
-.floating-button:hover,
-.create-folder-button:hover,
-.primary-button:hover,
-.ghost-button:hover,
-.inline-icon-button:hover,
-.scope-button:hover,
-.tab-button:hover,
-.folder-icon-button:hover,
-.folder-pill:hover,
-.map-icon-button:hover,
-.map-search__button:hover {
-  transform: none !important;
 }
 
 /* mapbox controls */
